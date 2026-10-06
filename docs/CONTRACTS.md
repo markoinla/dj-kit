@@ -79,3 +79,17 @@ Depends on the three packages by local path. Drop files or folders in; each trac
 actions Check Quality, Separate Stems, Repair (Apollo); a job queue shows progress;
 results land in the output folder with Reveal in Finder. Design follows Wax Studio
 (`Wax Studio`, see its `WaxMac/DesignSystem`).
+
+## Packages/ApolloMLX — experimental native port of Apollo (MLX Swift)
+
+Same job as the Python bridge, no Python. Built to compare speed and quality against it;
+the app may later swap it in behind the same `ApolloRepairing` seam.
+
+```swift
+public actor ApolloMLXRepairer {
+  public init(modelsDirectory: URL)            // default App Support/DJTools/models/apollo-mlx
+  public func prepare(progress: @escaping @Sendable (String) -> Void) async throws   // fetch/convert weights
+  public func repair(input: URL, output: URL,
+                     progress: @escaping @Sendable (Double) -> Void) async throws -> URL
+}
+```
