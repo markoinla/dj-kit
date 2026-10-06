@@ -1,7 +1,9 @@
 # dj-tools
 
 Native macOS app (SwiftUI) for DJ track prep: stem separation, Apollo repair of lossy
-rips, and a bad-file detector. Personal use; output goes into Rekordbox by hand.
+rips (native MLX port, `Packages/ApolloMLX`; the Python `apollo/` + `ApolloBridge` are kept
+only as the reference), and a bad-file detector. Results are saved as AIFF (default), WAV,
+FLAC or MP3 through `Packages/AudioExport`. Personal use; output goes into Rekordbox by hand.
 Rekordbox already does BPM, key, beatgrid and gain, so those are out of scope.
 
 - Module seams: `docs/CONTRACTS.md`. Research: `research/`.
@@ -15,4 +17,6 @@ Rekordbox already does BPM, key, beatgrid and gain, so those are out of scope.
 - No signing yet.
 - Building MLX code needs Xcode's Metal toolchain (`xcodebuild -downloadComponent MetalToolchain`,
   no sudo; already installed on mac-ci). Don't run stems and Apollo together on a 16 GB Mac:
-  each peaks around 6 GB and the box swaps hard.
+  stems peak around 5.4 GB, Apollo around 2.9 GB, and the box swaps hard.
+- Run `xcodegen` before every app build on the Mac: `scripts/mac.sh` rsyncs with `--delete`,
+  which removes the generated (gitignored) `app/DJTools/Info.plist`.
