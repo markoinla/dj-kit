@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Entry point. `-renderPreviews <dir>` (Debug builds) draws the main screens
 /// to PNGs offscreen and exits, for checking the design without a GUI
-/// session; anything else starts the app.
+/// session; `-selfTest <audio> <out dir>` (any build) runs the real engines
+/// headlessly and prints JSON (see `SelfTest`); anything else starts the app.
 @main
 @MainActor
 enum DJToolsMain {
@@ -15,6 +16,10 @@ enum DJToolsMain {
             exit(0)
         }
         #endif
+        if SelfTest.requested() {
+            SelfTest.start()
+            dispatchMain()
+        }
         DJToolsApp.main()
     }
 }
@@ -42,6 +47,9 @@ struct DJToolsApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .appInfo) {
+                Button("About DJ Tools") { Credits.showAboutPanel() }
+            }
         }
 
         Settings {

@@ -49,6 +49,8 @@ struct Job: Identifiable, Equatable, Sendable {
     /// 0…1 while running, when the engine reports it.
     var progress: Double?
     var resultURL: URL?
+    /// The engine's own status line while running (Apollo: "Loading model", …).
+    var statusText: String?
     let createdAt: Date
 
     init(trackID: Track.ID, trackName: String, kind: Kind, id: UUID = UUID(), createdAt: Date = Date()) {
@@ -69,7 +71,8 @@ struct Job: Identifiable, Equatable, Sendable {
             case .stems: "Separating"
             case .repair: "Repairing"
             }
-            return progress.map { "\(verb) · \(DJFormat.percent($0))" } ?? "\(verb)…"
+            let label = statusText ?? verb
+            return progress.map { "\(label) · \(DJFormat.percent($0))" } ?? "\(label)…"
         case .finished: return "Done"
         case .failed(let message): return message
         case .cancelled: return "Cancelled"

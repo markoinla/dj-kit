@@ -57,6 +57,22 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Credits") {
+                ForEach(Credits.all) { credit in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Link(credit.name, destination: credit.url)
+                            Spacer()
+                            Text(credit.license).foregroundStyle(.secondary)
+                        }
+                        Text(credit.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
             if model.engines.isFake {
                 Section("Engines") {
                     Text("Demo engines: jobs sleep and write placeholder files. Launched with -useFakeEngines, or the engine packages aren't linked yet.")
@@ -77,7 +93,7 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("Running repairs stop, and the next one downloads about 1–2 GB again.")
+            Text("Running repairs stop, and the next one downloads about 600 MB again.")
         }
         .task { await model.refreshApolloState() }
     }

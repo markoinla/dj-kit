@@ -133,7 +133,10 @@ public enum QualityAnalyzer {
         if cutoff.hz <= Thresholds.lowQualityMaxCutoffHz {
             return (.lowQuality, "\(label), cuts off at \(khz) — low quality")
         }
-        if let kbps = bitrateKbps, kbps < Thresholds.lowQualityMaxBitrateKbps {
+        // The measured band decides; the average bitrate only breaks the tie in the
+        // grey zone between the two cutoffs (VBR averages read low on sparse music).
+        if cutoff.hz < Thresholds.goodLossyMinCutoffHz,
+           let kbps = bitrateKbps, kbps < Thresholds.lowQualityMaxBitrateKbps {
             return (.lowQuality, "\(label) — low bitrate (highs reach \(khz))")
         }
         return (.goodLossy, "\(label), highs reach \(khz) — good")

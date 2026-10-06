@@ -176,10 +176,42 @@ struct ClassifyTests {
         #expect(classify(false, kbps: 192, hz: 19_000) == .goodLossy)
         #expect(classify(false, kbps: 128, hz: 16_000) == .lowQuality)
         #expect(classify(false, kbps: 320, hz: 16_000) == .lowQuality)  // upsampled 128k
-        #expect(classify(false, kbps: 160, hz: 17_500) == .lowQuality)
+        #expect(classify(false, kbps: 160, hz: 17_500) == .lowQuality)  // grey zone: bitrate breaks the tie
+        #expect(classify(false, kbps: 256, hz: 17_500) == .goodLossy)
+        #expect(classify(false, kbps: nil, hz: 17_500) == .goodLossy)
         #expect(classify(false, kbps: nil, hz: 19_500) == .goodLossy)
         #expect(classify(false, kbps: nil, hz: nil) == .unknown)
         #expect(classify(true, kbps: nil, hz: nil) == .unknown)
+    }
+
+    /// The cutoff, when measured, outranks the average bitrate.
+    @Test func measuredCutoffBeatsAverageBitrate() {
+        // A VBR MP3 averaging 184 kbps whose highs reach 18.8 kHz.
+        #expect(classify(false, kbps: 184, hz: 18_800) == .goodLossy)
+        #expect(classify(false, kbps: 128, hz: 18_000) == .goodLossy)
+        #expect(classify(false, kbps: 191, hz: 17_999) == .lowQuality)
+        // Bitrate still can't rescue a low cutoff.
+        #expect(classify(false, kbps: 320, hz: 16_500) == .lowQuality)
+    }
+
+    /// No cutoff (too little audio): the bitrate is all there is.
+    @Test func bitrateIsTheFallbackWithoutACutoff() {
+        func verdict(_ kbps: Int?, frames: Int) -> QualityVerdict {
+            QualityAnalyzer.classify(isLossless: false, codecLabel: "MP3", bitrateKbps: kbps, cutoff: nil,
+                                     sampleRate: 44_100, usableFrames: frames).0
+        }
+        #expect(verdict(184, frames: 4) == .lowQuality)
+        #expect(verdict(128, frames: 0) == .lowQuality)
+        #expect(verdict(256, frames: 4) == .unknown)
+        #expect(verdict(nil, frames: 4) == .unknown)
+    }
+
+    @Test func vbrSummaryReadsGood() {
+        let (v, s) = QualityAnalyzer.classify(isLossless: false, codecLabel: "MP3", bitrateKbps: 184,
+                                              cutoff: CutoffEstimate(hz: 18_800, isCliff: true, dropDb: 40),
+                                              sampleRate: 44_100, usableFrames: 100)
+        #expect(v == .goodLossy)
+        #expect(s == "MP3 184 kbps, highs reach 18.8 kHz — good")
     }
 
     @Test func summaries() {

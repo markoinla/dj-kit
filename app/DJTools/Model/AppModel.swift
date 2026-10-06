@@ -16,8 +16,11 @@ struct ApolloSetupRequest: Identifiable, Equatable {
 /// The app's state: dropped tracks, the job queue and Apollo's setup.
 ///
 /// Jobs: quality checks start straight away, up to `maxConcurrentChecks`
-/// at once. Stems and Apollo repairs are heavy and run strictly one at a
-/// time, in the order they were asked for.
+/// at once. Stems and Apollo repairs are heavy (each peaks around 6 GB) and
+/// run strictly one at a time *across both kinds*, in the order they were
+/// asked for: `heavyInFlight` is a single slot shared by every heavy job and
+/// is only released when the job's task has returned, so a cancelled job
+/// still holds it until its engine has actually stopped.
 @MainActor
 @Observable
 final class AppModel {
@@ -263,10 +266,16 @@ final class AppModel {
         jobs[index].progress = fraction
     }
 
+    private func setStatus(_ id: Job.ID, _ text: String) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].state == .running else { return }
+        jobs[index].statusText = text
+    }
+
     private func finish(_ id: Job.ID, _ state: Job.State, result: URL? = nil) {
         guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].state == .running else { return }
         jobs[index].state = state
         jobs[index].resultURL = result
+        jobs[index].statusText = nil
         if state == .finished { jobs[index].progress = 1 }
     }
 
@@ -307,7 +316,12 @@ final class AppModel {
 
             case .repair:
                 let output = Self.unique(try outputFolder().appending(path: "\(track.name) (Apollo).wav"))
-                let written = try await engines.apollo.repair(input: track.url, output: output, progress: progress)
+                let status: @Sendable (String) -> Void = { [weak self] line in
+                    Task { @MainActor in self?.setStatus(job.id, line) }
+                }
+                let written = try await engines.apollo.repair(
+                    input: track.url, output: output, progress: progress, status: status
+                )
                 guard isRunning(job.id) else { return }
                 updateTrack(track.id) { $0.results.append(TrackResult(kind: .repaired(output: written))) }
                 finish(job.id, .finished, result: written)

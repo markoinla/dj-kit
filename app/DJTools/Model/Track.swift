@@ -31,6 +31,15 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
         verdict == .lowQuality || verdict == .fakeLossless
     }
 
+    /// A very low-quality source (≤ 96 kbps lossy, or recorded below
+    /// 44.1 kHz): Apollo has little to work from, so results vary.
+    var isVeryLowSource: Bool {
+        guard let quality else { return false }
+        if quality.sampleRate > 0, quality.sampleRate < 44_100 { return true }
+        if !quality.isLosslessContainer, let kbps = quality.declaredBitrateKbps, kbps <= 96 { return true }
+        return false
+    }
+
     var fileExists: Bool { FileCheck.exists(url) }
 
     static let supportedExtensions: Set<String> = ["mp3", "m4a", "aac", "flac", "wav", "aiff", "aif"]

@@ -31,9 +31,12 @@ protocol ApolloRepairing: Sendable {
     func state() async -> DJApolloSetupState
     /// uv + Python + deps + weights. `progress` gets status lines for the UI.
     func install(progress: @escaping @Sendable (String) -> Void) async throws
+    /// `status` gets Apollo's own status lines ("Loading model",
+    /// "Repairing on MPS", …) for the queue row.
     func repair(
         input: URL, output: URL,
-        progress: @escaping @Sendable (Double) -> Void
+        progress: @escaping @Sendable (Double) -> Void,
+        status: @escaping @Sendable (String) -> Void
     ) async throws -> URL
     func cancel() async
     /// Removes the installed runtime so the next repair sets it up again.
@@ -48,18 +51,21 @@ struct Engines: Sendable {
     /// True for the fakes: the toolbar says "Demo engines".
     var isFake: Bool
 
-    /// The real engines, or nil until the packages are linked.
-    ///
-    /// INTEGRATOR: once QualityKit, StemsKit and ApolloBridge are in
-    /// project.yml, return the adapters here, e.g.
-    ///
-    ///     Engines(quality: QualityKitAdapter(),
-    ///             stems: StemsKitAdapter(),
-    ///             apollo: ApolloBridgeAdapter(projectDirectory: Bundle.main.url(forResource: "apollo", withExtension: nil)!,
-    ///                                         supportDirectory: supportDirectory),
-    ///             isFake: false)
+    /// The real engines: QualityKit, StemsKit and ApolloBridge behind their
+    /// adapters (Engines/RealEngines.swift). Apollo runs the `apollo/` uv
+    /// project bundled in Resources; nil only if that is missing from the
+    /// bundle (a broken build), so the app falls back to the fakes.
     static func real(supportDirectory: URL) -> Engines? {
-        nil
+        guard let apolloProject = Bundle.main.url(forResource: "apollo", withExtension: nil) else {
+            NSLog("DJTools: apollo/ isn't in the app bundle; using the demo engines")
+            return nil
+        }
+        return Engines(
+            quality: QualityKitAdapter(),
+            stems: StemsKitAdapter(supportDirectory: supportDirectory),
+            apollo: ApolloBridgeAdapter(projectDirectory: apolloProject, supportDirectory: supportDirectory),
+            isFake: false
+        )
     }
 
     static func fake(supportDirectory: URL, speed: Double = 1) -> Engines {
