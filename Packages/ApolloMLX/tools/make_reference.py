@@ -5,11 +5,15 @@
         --start 60 --seconds 7 --out reference.safetensors
 
 Decodes `--audio` to 44.1 kHz stereo with PyAV (as apollo/ does), cuts a fixed chunk and
-runs the upstream PyTorch model on CPU in fp32. Saved tensors (torch layouts):
+runs the upstream PyTorch model on CPU in fp32. `--audio noise` uses seeded white noise
+(0.1 rms) instead: a well-conditioned input that measures pure arithmetic agreement, where
+a lossy chunk measures agreement on the near-silent bands Apollo amplifies.
+Saved tensors (torch layouts):
   input    [1, C, S]         the chunk fed to both implementations
   features [C, 80, 256, T]   after the band-split bottleneck
   layer0   [C, 80, 256, T]   after the first BSNet layer
   output   [1, C, S]         final restored waveform
+  output64 [1, C, S]         the same model run in fp64 (the exact answer, to judge both)
 The upstream model is imported from apollo/src/apollo_repair/model.py (a verbatim copy of
 look2hear/models/apollo.py at e84bcac minus a print) unless --model points elsewhere.
 """
@@ -52,8 +56,11 @@ def main():
     model = m.load_apollo(a.checkpoint, "cpu")
     torch.set_num_threads(12)
 
-    audio = decode(a.audio)
     s0, n = int(a.start * 44100), int(a.seconds * 44100)
+    if a.audio == "noise":
+        audio = (0.1 * np.random.default_rng(0).standard_normal((2, s0 + n))).astype(np.float32)
+    else:
+        audio = decode(a.audio)
     x = torch.from_numpy(np.ascontiguousarray(audio[:, s0:s0 + n]))[None]
     grabbed = {}
     model.net[0].register_forward_hook(lambda mod, i, o: grabbed.__setitem__("layer0", o))
@@ -62,9 +69,13 @@ def main():
         t = time.time()
         y = model(x)
         print(f"torch cpu forward {time.time() - t:.2f}s for {a.seconds}s stereo")
+    m64 = model.double()
+    m64.eps = float(np.finfo(np.float32).eps)  # same eps as the fp32 model
+    with torch.inference_mode():
+        y64 = m64(x.double()).float()
     save_file({
         "input": x.numpy(), "features": feats.numpy(),
-        "layer0": grabbed["layer0"].numpy(), "output": y.numpy(),
+        "layer0": grabbed["layer0"].numpy(), "output": y.numpy(), "output64": y64.numpy(),
     }, a.out)
     print("saved", a.out, {k: tuple(v.shape) for k, v in
                            {"input": x, "features": feats, "output": y}.items()})
