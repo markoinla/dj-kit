@@ -11,8 +11,8 @@ enum ID3v2 {
   }
 }
 
-/// An ID3v2.3 or v2.4 tag as a list of raw frames, so frames we don't know (BPM,
-/// key, Rekordbox and Serato GEOBs) survive a rewrite byte for byte.
+/// An ID3v2.3 or v2.4 tag as a list of raw frames, so frames we don't know
+/// (Rekordbox and Serato GEOBs, …) survive a rewrite byte for byte.
 ///
 /// Parsing undoes tag-level unsynchronisation and skips the extended header, and a
 /// v2.2 tag becomes v2.3 (known frames converted, the rest dropped); `serialized()`
@@ -118,6 +118,8 @@ struct ID3Tag {
     }
     if let label = tags.label { replace(["TPUB"], with: [.text("TPUB", label)]) }
     if let isrc = tags.isrc { replace(["TSRC"], with: [.text("TSRC", isrc)]) }
+    if let bpm = tags.bpmText { replace(["TBPM"], with: [.text("TBPM", bpm)]) }
+    if let key = tags.keyText { replace(["TKEY"], with: [.text("TKEY", key)]) }
     let major = major
     if let comment = tags.comment {
       replace(where: {
@@ -165,6 +167,8 @@ struct ID3Tag {
     tags.year = text("TDRC", "TYER", "TDOR", "TORY")
     tags.label = text("TPUB")
     tags.isrc = text("TSRC")
+    tags.bpm = text("TBPM")
+    tags.key = text("TKEY")
     tags.comment = frames.lazy.filter { $0.id == "COMM" }
       .compactMap { Self.content(of: $0, major: major).flatMap(Self.comment) }
       .first { $0.description.isEmpty && !$0.text.isEmpty }?.text

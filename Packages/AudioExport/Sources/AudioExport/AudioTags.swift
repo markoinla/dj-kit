@@ -16,10 +16,15 @@ public struct AudioTags: Sendable, Equatable {
   public var label: String?
   public var isrc: String?
   public var comment: String?
+  /// Tag text as stored ("124", "123.5"); ID3 TBPM, Vorbis BPM, M4A tmpo.
+  public var bpm: String?
+  /// Tag text as stored ("8A", "Am"); ID3 TKEY, Vorbis INITIALKEY.
+  public var key: String?
 
   public init(
     title: String? = nil, artist: String? = nil, album: String? = nil, artwork: Data? = nil,
-    genre: String? = nil, year: String? = nil, label: String? = nil, isrc: String? = nil, comment: String? = nil
+    genre: String? = nil, year: String? = nil, label: String? = nil, isrc: String? = nil, comment: String? = nil,
+    bpm: String? = nil, key: String? = nil
   ) {
     self.title = title
     self.artist = artist
@@ -30,11 +35,13 @@ public struct AudioTags: Sendable, Equatable {
     self.label = label
     self.isrc = isrc
     self.comment = comment
+    self.bpm = bpm
+    self.key = key
   }
 
   public var isEmpty: Bool {
     title == nil && artist == nil && album == nil && artwork == nil && genre == nil && year == nil
-      && label == nil && isrc == nil && comment == nil
+      && label == nil && isrc == nil && comment == nil && bpm == nil && key == nil
   }
 
   /// The same tags with `suffix` on the title (" (Vocals)", " (Repaired)"), using
@@ -44,6 +51,15 @@ public struct AudioTags: Sendable, Equatable {
     let base = title?.trimmingCharacters(in: .whitespacesAndNewlines)
     copy.title = ((base?.isEmpty == false ? base : nil) ?? fallbackTitle) + suffix
     return copy
+  }
+
+  /// BPM and key as written: trimmed, nil when empty.
+  var bpmText: String? { Self.trimmed(bpm) }
+  var keyText: String? { Self.trimmed(key) }
+
+  private static func trimmed(_ value: String?) -> String? {
+    guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+    return value
   }
 
   /// "image/png" or "image/jpeg", from the bytes.
@@ -106,6 +122,12 @@ public struct AudioTags: Sendable, Equatable {
     ])
     tags.isrc = await first([M4AKeys.isrc, .id3MetadataInternationalStandardRecordingCode])
     tags.comment = await first([.iTunesMetadataUserComment, .quickTimeMetadataComment])
+    if let item = AVMetadataItem.metadataItems(from: items, filteredByIdentifier: .iTunesMetadataBeatsPerMin).first,
+      let n = try? await item.load(.numberValue)?.intValue, n > 0
+    {
+      tags.bpm = String(n)
+    }
+    tags.key = await first([M4AKeys.initialKey, M4AKeys.initialKeyUpper])
     return tags
   }
 
@@ -120,6 +142,9 @@ public struct AudioTags: Sendable, Equatable {
 enum M4AKeys {
   static let label = AVMetadataIdentifier(rawValue: "itlk/com.apple.iTunes.LABEL")
   static let isrc = AVMetadataIdentifier(rawValue: "itlk/com.apple.iTunes.ISRC")
+  /// Mixed In Key and Rekordbox write it lower case.
+  static let initialKey = AVMetadataIdentifier(rawValue: "itlk/com.apple.iTunes.initialkey")
+  static let initialKeyUpper = AVMetadataIdentifier(rawValue: "itlk/com.apple.iTunes.INITIALKEY")
 }
 
 func bigEndian32(_ value: UInt32) -> Data {

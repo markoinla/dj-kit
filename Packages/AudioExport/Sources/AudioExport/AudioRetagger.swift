@@ -18,8 +18,9 @@ public enum AudioRetagError: LocalizedError, Equatable {
 public enum AudioRetagger {
   /// Merges `tags` into `url`'s tags and returns where the file ended up.
   ///
-  /// Every non-nil field replaces the matching tag; everything else in the file
-  /// (BPM, key, other comments, Rekordbox and Serato frames, …) stays as it was.
+  /// Every non-nil field replaces the matching tag (empty BPM / key count as nil);
+  /// everything else in the file (other comments, Rekordbox and Serato frames, …)
+  /// stays as it was.
   /// Non-nil artwork replaces the front-cover picture(s). The audio is never
   /// re-encoded: MP3, AIFF, WAV and FLAC audio bytes come out identical; M4A goes
   /// through an AVFoundation passthrough export (same samples, new container).
@@ -28,7 +29,8 @@ public enum AudioRetagger {
   ///   trailing ID3v1 tag is left alone.
   /// - AIFF / WAV: the "ID3 " chunk, added when missing.
   /// - FLAC: Vorbis comments and PICTURE blocks.
-  /// - M4A: iTunes atoms (label and ISRC as "----:com.apple.iTunes:" atoms).
+  /// - M4A: iTunes atoms (label, ISRC and key as "----:com.apple.iTunes:" atoms;
+  ///   BPM rounded into "tmpo", left alone when it isn't a number).
   ///
   /// The new file is written beside the target and then swapped in, so the
   /// original stays intact if anything fails or the task is cancelled. With
@@ -259,6 +261,15 @@ private enum M4ARetagger {
     put(tags.label, M4AKeys.label, replacing: [])
     put(tags.isrc, M4AKeys.isrc, replacing: [])
     put(tags.comment, .iTunesMetadataUserComment, replacing: [.quickTimeMetadataComment])
+    put(tags.keyText, M4AKeys.initialKey, replacing: [M4AKeys.initialKeyUpper])
+    if let bpm = tags.bpmText.flatMap(Double.init), bpm.isFinite, bpm >= 1, bpm < 1000 {
+      replacedIDs.insert(.iTunesMetadataBeatsPerMin)
+      let item = AVMutableMetadataItem()
+      item.identifier = .iTunesMetadataBeatsPerMin
+      item.value = NSNumber(value: Int16(bpm.rounded()))
+      item.dataType = kCMMetadataBaseDataType_SInt16 as String
+      added.append(item)
+    }
     if let artwork = tags.artwork {
       replacedIDs.formUnion([.iTunesMetadataCoverArt, .quickTimeMetadataArtwork])
       replacedKeys.insert(.commonKeyArtwork)
