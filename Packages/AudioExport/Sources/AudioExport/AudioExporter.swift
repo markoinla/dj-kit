@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 import AudioToolbox
 import CLAME
@@ -30,17 +31,23 @@ public enum AudioExporter {
   /// - `tags` go into AIFF (ID3 chunk), FLAC (Vorbis comments + picture) and
   ///   MP3 (ID3v2.3); WAV gets none.
   ///
+  /// `gainDB` scales every sample on the way through (loudness normalization;
+  /// 0 = untouched). With a gain the output is always 24-bit (a 16-bit
+  /// source's samples no longer sit on the 16-bit grid), and nothing is
+  /// clipped or limited here: the caller keeps the peaks below full scale.
+  /// `source` may also be any compressed file AVAudioFile decodes (MP3, AAC, FLAC).
+  ///
   /// The file appears atomically (written beside it, then moved into place).
   /// `removingSource` deletes `source` once the destination exists. Runs off
   /// the caller's executor; cancelling the calling task stops it and leaves
   /// nothing behind. `progress` (0…1) is called from a background thread.
   public static func export(
     _ source: URL, to destination: URL, format: AudioFileFormat,
-    tags: AudioTags? = nil, removingSource: Bool = false,
+    tags: AudioTags? = nil, gainDB: Double = 0, removingSource: Bool = false,
     progress: (@Sendable (Double) -> Void)? = nil
   ) async throws -> URL {
     let work = Task.detached(priority: .userInitiated) {
-      try convert(source, to: destination, format: format, tags: tags, progress: progress)
+      try convert(source, to: destination, format: format, tags: tags, gainDB: gainDB, progress: progress)
     }
     let written = try await withTaskCancellationHandler {
       try await work.value
@@ -57,7 +64,7 @@ public enum AudioExporter {
 
   static func convert(
     _ source: URL, to destination: URL, format: AudioFileFormat,
-    tags: AudioTags?, progress: (@Sendable (Double) -> Void)?
+    tags: AudioTags?, gainDB: Double = 0, progress: (@Sendable (Double) -> Void)?
   ) throws -> URL {
     let input: AVAudioFile
     do {
@@ -72,10 +79,11 @@ public enum AudioExporter {
       ".\(destination.lastPathComponent).\(UUID().uuidString).partial")
     defer { try? fm.removeItem(at: partial) }
 
+    let gain = Float(pow(10, gainDB / 20))
     progress?(0)
     switch format {
     case .aiff, .wav, .flac:
-      try writeLossless(input, to: partial, format: format, progress: progress)
+      try writeLossless(input, to: partial, format: format, gain: gain, progress: progress)
       if let tags, !tags.isEmpty {
         if format == .aiff { try appendAIFFID3Chunk(ID3v2.tag(tags), to: partial) }
         if format == .flac {
@@ -84,7 +92,7 @@ public enum AudioExporter {
         }
       }
     case .mp3_320, .mp3_256, .mp3_192:
-      try writeMP3(input, to: partial, kbps: format.mp3BitrateKbps!, tags: tags, progress: progress)
+      try writeMP3(input, to: partial, kbps: format.mp3BitrateKbps!, tags: tags, gain: gain, progress: progress)
     }
     try Task.checkCancellation()
     if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
@@ -93,8 +101,10 @@ public enum AudioExporter {
     return destination
   }
 
-  /// Integer bit depth for lossless output: the source's 16 or 24, else 24.
-  static func bitDepth(of file: AVAudioFile) -> UInt32 {
+  /// Integer bit depth for lossless output: the source's 16 or 24, else 24
+  /// (always 24 with a gain).
+  static func bitDepth(of file: AVAudioFile, gain: Float = 1) -> UInt32 {
+    if gain != 1 { return 24 }
     let settings = file.fileFormat.settings
     let isFloat = (settings[AVLinearPCMIsFloatKey] as? Bool) ?? false
     let bits = (settings[AVLinearPCMBitDepthKey] as? Int) ?? 24
@@ -104,10 +114,10 @@ public enum AudioExporter {
   // MARK: - AIFF / WAV / FLAC (Core Audio)
 
   private static func writeLossless(
-    _ input: AVAudioFile, to url: URL, format: AudioFileFormat,
+    _ input: AVAudioFile, to url: URL, format: AudioFileFormat, gain: Float,
     progress: (@Sendable (Double) -> Void)?
   ) throws {
-    let bits = bitDepth(of: input)
+    let bits = bitDepth(of: input, gain: gain)
     let channels = input.processingFormat.channelCount
     var asbd = AudioStreamBasicDescription()
     asbd.mSampleRate = input.processingFormat.sampleRate
@@ -145,7 +155,7 @@ public enum AudioExporter {
       UInt32(MemoryLayout<AudioStreamBasicDescription>.size), &client)
     guard status == noErr else { throw AudioExportError.coreAudio(status, "client format") }
 
-    try forEachChunk(of: input, progress: progress) { buffer in
+    try forEachChunk(of: input, gain: gain, progress: progress) { buffer in
       let status = ExtAudioFileWrite(file, buffer.frameLength, buffer.audioBufferList)
       guard status == noErr else { throw AudioExportError.coreAudio(status, "write") }
     }
@@ -154,9 +164,9 @@ public enum AudioExporter {
     guard status == noErr else { throw AudioExportError.coreAudio(status, "finish file") }
   }
 
-  /// Reads `input` from the start in chunks, checking for cancellation.
+  /// Reads `input` from the start in chunks, scaled by `gain`, checking for cancellation.
   private static func forEachChunk(
-    of input: AVAudioFile, progress: (@Sendable (Double) -> Void)?,
+    of input: AVAudioFile, gain: Float = 1, progress: (@Sendable (Double) -> Void)?,
     _ body: (AVAudioPCMBuffer) throws -> Void
   ) throws {
     guard let buffer = AVAudioPCMBuffer(pcmFormat: input.processingFormat, frameCapacity: chunkFrames) else {
@@ -172,6 +182,12 @@ public enum AudioExporter {
         throw AudioExportError.unreadable(error.localizedDescription)
       }
       if buffer.frameLength == 0 { break }
+      if gain != 1, let channels = buffer.floatChannelData {
+        var g = gain
+        for c in 0..<Int(buffer.format.channelCount) {
+          vDSP_vsmul(channels[c], 1, &g, channels[c], 1, vDSP_Length(buffer.frameLength))
+        }
+      }
       try body(buffer)
       // The last 2% is the tags and the move.
       progress?(0.98 * Double(input.framePosition) / Double(total))
@@ -195,7 +211,7 @@ public enum AudioExporter {
   // MARK: - MP3 (LAME)
 
   private static func writeMP3(
-    _ input: AVAudioFile, to url: URL, kbps: Int, tags: AudioTags?,
+    _ input: AVAudioFile, to url: URL, kbps: Int, tags: AudioTags?, gain: Float,
     progress: (@Sendable (Double) -> Void)?
   ) throws {
     let channels = Int(input.processingFormat.channelCount)
@@ -235,7 +251,7 @@ public enum AudioExporter {
       if count > 0 { try handle.write(contentsOf: mp3[0..<Int(count)]) }
     }
 
-    try forEachChunk(of: input, progress: progress) { buffer in
+    try forEachChunk(of: input, gain: gain, progress: progress) { buffer in
       guard let data = buffer.floatChannelData else { throw AudioExportError.unreadable("not float") }
       let left = data[0], right = channels > 1 ? data[1] : data[0]
       let count = mp3.withUnsafeMutableBufferPointer { out in

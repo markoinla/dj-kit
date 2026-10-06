@@ -56,6 +56,36 @@ struct AudioExportTests {
     }
   }
 
+  /// Loudness normalization: every sample scaled, 24-bit out even from a 16-bit source.
+  @Test(arguments: [AudioFileFormat.aiff, .flac])
+  func gainScalesEverySample(format: AudioFileFormat) async throws {
+    let source = try Synth.wav24(in: dir, seconds: 1, bits: 16)
+    let out = dir.appendingPathComponent("gain.\(format.fileExtension)")
+    _ = try await AudioExporter.export(source, to: out, format: format, gainDB: -6)
+    let a = try Decoded(source), b = try Decoded(out)
+    #expect(b.bits == 24)
+    #expect(b.frames == a.frames)
+    let g = Float(pow(10, -6.0 / 20))
+    var worst: Float = 0
+    for (x, y) in zip(a.samples, b.samples) {
+      for (u, v) in zip(x, y) { worst = max(worst, abs(u * g - v)) }
+    }
+    #expect(worst <= 1.0 / Float(1 << 23), "max error \(worst)")
+  }
+
+  @Test func gainAppliesToMP3() async throws {
+    let source = try Synth.wav24(in: dir, seconds: 2)
+    let loud = dir.appendingPathComponent("loud.mp3"), quiet = dir.appendingPathComponent("quiet.mp3")
+    _ = try await AudioExporter.export(source, to: loud, format: .mp3_320)
+    _ = try await AudioExporter.export(source, to: quiet, format: .mp3_320, gainDB: -10)
+    func rms(_ d: Decoded) -> Double {
+      let x = d.samples[0]
+      return (x.reduce(0.0) { $0 + Double($1 * $1) } / Double(x.count)).squareRoot()
+    }
+    let difference = 20 * log10(rms(try Decoded(quiet)) / rms(try Decoded(loud)))
+    #expect(abs(difference - -10) < 0.1, "\(difference) dB")
+  }
+
   @Test func aiffCarriesAnID3Chunk() async throws {
     let source = try Synth.wav24(in: dir, seconds: 1)
     let out = dir.appendingPathComponent("tagged.aiff")
