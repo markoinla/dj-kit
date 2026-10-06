@@ -193,10 +193,11 @@ struct StepFooter<Leading: View, Trailing: View>: View {
 
 // MARK: - ① Analyze
 
-/// ① Analyze: the quality check and Track ID, both run on drop, so this
-/// step shows its own progress before anything is chosen. In a run or after
-/// one it's just ✓ and the quality line.
-// BPM and key will be measured here too: their readout goes in `detail`.
+/// ① Analyze: the quality check, Track ID and BPM / key, all run on drop
+/// (BPM / key also when a track that has none is shown), so this step shows
+/// its own progress before anything is chosen. In a run or after one it's ✓,
+/// the quality line and BPM / key, with the file's own tags under them when
+/// they disagree.
 struct AnalyzeRow: View {
     @Environment(AppModel.self) private var model
     let tracks: [Track]
@@ -220,6 +221,12 @@ struct AnalyzeRow: View {
             if isRunning {
                 StepBar(fraction: barFraction)
             }
+            if tracks.count == 1, let track = tracks.first, !analyzing(track), let mismatch = track.musicalTagMismatch {
+                Text(mismatch)
+                    .djText(.caption)
+                    .foregroundStyle(DJColor.mutedForeground.opacity(0.7))
+                    .monospacedDigit()
+            }
             if !compact {
                 if tracks.count == 1, let track = tracks.first {
                     TrackIDLine(track: track, job: model.job(for: track.id, kind: .identify))
@@ -228,6 +235,7 @@ struct AnalyzeRow: View {
                 }
             }
         }
+        .task(id: tracks.map(\.id)) { model.analyzeIfNeeded(Array(tracks.map(\.id).prefix(12))) }
     }
 
     private func checking(_ track: Track) -> Bool {
@@ -238,7 +246,13 @@ struct AnalyzeRow: View {
         model.job(for: track.id, kind: .identify)?.state.isActive == true
     }
 
-    private var isRunning: Bool { tracks.contains { checking($0) || listening($0) } }
+    private func analyzing(_ track: Track) -> Bool {
+        model.job(for: track.id, kind: .analyze)?.state.isActive == true
+    }
+
+    private func busy(_ track: Track) -> Bool { checking(track) || listening(track) || analyzing(track) }
+
+    private var isRunning: Bool { tracks.contains(where: busy) }
 
     private var mark: StepMark.Style {
         if isRunning { return .running }
@@ -248,13 +262,13 @@ struct AnalyzeRow: View {
     }
 
     /// The bar under a running Analyze: the share of tracks done, Track ID's
-    /// own progress, or indeterminate for a quality check.
+    /// or BPM / key's own progress, or indeterminate for a quality check.
     private var barFraction: Double? {
         if tracks.count > 1 {
-            return Double(tracks.filter { !checking($0) && !listening($0) }.count) / Double(tracks.count)
+            return Double(tracks.filter { !busy($0) }.count) / Double(tracks.count)
         }
         guard let track = tracks.first, !checking(track) else { return nil }
-        return model.job(for: track.id, kind: .identify)?.progress
+        return model.job(for: track.id, kind: listening(track) ? .identify : .analyze)?.progress
     }
 
     @ViewBuilder private var detail: some View {
@@ -264,21 +278,76 @@ struct AnalyzeRow: View {
             Text(["\(checked) of \(tracks.count) checked", matched > 0 ? "\(matched) matched" : nil]
                 .compactMap { $0 }.joined(separator: " · "))
         } else if let track = tracks.first {
-            if checking(track) {
-                Text("Checking…")
-            } else if let quality = track.quality {
-                if listening(track), !compact {
-                    Text("Listening…")
-                } else {
-                    QualityLine(track: track, quality: quality)
-                }
-            } else if let error = track.qualityError {
-                Text("Couldn't check").help(error)
-            } else if listening(track) {
-                Text("Listening…")
+            HStack(spacing: 5) {
+                quality(track)
+                if hasQualityLine(track), hasMusicalLine(track) { Text("·") }
+                musical(track)
             }
         }
     }
+
+    @ViewBuilder private func quality(_ track: Track) -> some View {
+        if checking(track) {
+            Text("Checking…")
+        } else if let quality = track.quality {
+            if listening(track), !compact {
+                Text("Listening…")
+            } else {
+                QualityLine(track: track, quality: quality)
+            }
+        } else if let error = track.qualityError {
+            Text("Couldn't check").help(error)
+        } else if listening(track) {
+            Text("Listening…")
+        }
+    }
+
+    private func hasQualityLine(_ track: Track) -> Bool {
+        checking(track) || listening(track) || track.quality != nil || track.qualityError != nil
+    }
+
+    /// "124 BPM · 8A · Am", the detection's status while it runs, or its failure.
+    @ViewBuilder private func musical(_ track: Track) -> some View {
+        if let job = model.job(for: track.id, kind: .analyze), job.state.isActive {
+            Text(job.statusText ?? "Analyzing…")
+        } else if let readout = track.musicalReadout {
+            Text(readout)
+                .foregroundStyle(DJColor.foreground)
+                #if DEBUG
+                .help(debugDetails(track))
+                #endif
+        } else if let error = analysisFailure(track) {
+            Text("Couldn't analyze").help(error)
+            if !compact {
+                DJLinkButton("Try Again") { model.analyze([track.id]) }
+                    .disabled(!track.fileExists)
+            }
+        }
+    }
+
+    private func hasMusicalLine(_ track: Track) -> Bool {
+        analyzing(track) || track.musicalReadout != nil || analysisFailure(track) != nil
+    }
+
+    /// The file's failure (kept), else the model's (couldn't be set up:
+    /// shown until the next try, not kept).
+    private func analysisFailure(_ track: Track) -> String? {
+        if let error = track.analysisError { return error }
+        return track.analysis == nil ? model.analysisUnavailable[track.id] : nil
+    }
+
+    #if DEBUG
+    /// "key margin 0.12 · stability 0.004 · 812 beats · raw 64.0".
+    private func debugDetails(_ track: Track) -> String {
+        guard let analysis = track.analysis else { return "" }
+        var parts: [String] = []
+        if let key = analysis.key { parts.append(String(format: "key margin %.3f", key.margin)) }
+        if let tempo = analysis.tempo {
+            parts.append(String(format: "stability %.4f · %d beats · raw %.2f", tempo.stability, tempo.beatCount, tempo.rawBPM))
+        }
+        return parts.joined(separator: " · ")
+    }
+    #endif
 }
 
 /// "MP3 128 · ● Low quality": the format and the verdict, the dot coloured

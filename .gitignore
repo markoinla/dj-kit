@@ -19,3 +19,4 @@ __pycache__/
 *.pem
 app/DJTools/Info.plist
 app/build/
+.claude/worktrees/

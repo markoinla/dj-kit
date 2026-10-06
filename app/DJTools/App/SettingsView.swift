@@ -2,13 +2,15 @@ import AppKit
 import AudioExport
 import SwiftUI
 
-/// Settings (⌘,): a sidebar of sections (results, Track ID, repair,
-/// loudness, credits) and the selected section's form.
+/// Settings (⌘,): a sidebar of sections (results, Track ID, analysis,
+/// repair, loudness, credits) and the selected section's form.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("settingsSection") private var section: SettingsSection = .general
     @State private var isConfirmingReset = false
     @State private var isResetting = false
+    @State private var isConfirmingModelRemoval = false
+    @State private var isRemovingModel = false
 
     var body: some View {
         NavigationSplitView {
@@ -35,7 +37,21 @@ struct SettingsView: View {
         } message: {
             Text("Running repairs stop. The next one downloads 66 MB again.")
         }
-        .task { await model.refreshApolloState() }
+        .confirmationDialog("Remove the tempo model?", isPresented: $isConfirmingModelRemoval) {
+            Button("Remove", role: .destructive) {
+                isRemovingModel = true
+                Task {
+                    await model.removeAnalysisModel()
+                    isRemovingModel = false
+                }
+            }
+        } message: {
+            Text("The next analysis downloads 81 MB again.")
+        }
+        .task {
+            await model.refreshApolloState()
+            await model.refreshAnalysisModel()
+        }
     }
 
     @ViewBuilder private var detail: some View {
@@ -80,6 +96,22 @@ struct SettingsView: View {
                 Toggle("Apply sure matches automatically", isOn: $settings.autoApplyMatches)
             } footer: {
                 Text("Shazam + Apple Music. Apply writes the tags without re-encoding.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .analysis:
+            Section {
+                Toggle("Detect BPM and key", isOn: $settings.detectBPMKey)
+                    .onChange(of: settings.detectBPMKey) { _, on in if !on { model.dropQueuedAnalyses() } }
+                Picker("Key tag", selection: $settings.keyTag) {
+                    ForEach(KeyTagStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                LabeledContent("Model", value: isRemovingModel ? "Removing…" : model.analysisModelReady ? "Installed" : "Not installed")
+                Button("Remove Model…", role: .destructive) { isConfirmingModelRemoval = true }
+                    .disabled(isRemovingModel || !model.analysisModelReady)
+            } footer: {
+                Text("Only fills BPM and key tags a file doesn't have.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -180,7 +212,7 @@ struct SettingsView: View {
 
 /// The settings window's sidebar entries.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, trackID, apollo, loudness, credits
+    case general, trackID, analysis, apollo, loudness, credits
 
     var id: Self { self }
 
@@ -188,6 +220,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .trackID: "Track ID"
+        case .analysis: "Analysis"
         case .apollo: "Repair"
         case .loudness: "Loudness"
         case .credits: "Credits"
@@ -198,6 +231,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "folder"
         case .trackID: "shazam.logo"
+        case .analysis: "metronome"
         case .apollo: "wand.and.stars"
         case .loudness: "speaker.wave.2"
         case .credits: "heart"

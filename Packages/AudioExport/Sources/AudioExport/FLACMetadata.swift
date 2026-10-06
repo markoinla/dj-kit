@@ -11,7 +11,7 @@ enum FLACTags {
   }
 
   /// Vorbis comment keys per AudioTags field: the one we write, then the ones it replaces.
-  private static var keys: [(write: String, replace: Set<String>, path: WritableKeyPath<AudioTags, String?>)] {
+  private static var keys: [(write: String, replace: Set<String>, path: KeyPath<AudioTags, String?>)] {
     [
       ("TITLE", ["TITLE"], \.title),
       ("ARTIST", ["ARTIST"], \.artist),
@@ -21,6 +21,8 @@ enum FLACTags {
       ("LABEL", ["LABEL", "ORGANIZATION"], \.label),
       ("ISRC", ["ISRC"], \.isrc),
       ("COMMENT", ["COMMENT"], \.comment),
+      ("BPM", ["BPM", "TEMPO"], \.bpmText),
+      ("INITIALKEY", ["INITIALKEY", "KEY"], \.keyText),
     ]
   }
 
@@ -124,6 +126,8 @@ enum FLACTags {
       tags.label = value("LABEL", "ORGANIZATION", "PUBLISHER")
       tags.isrc = value("ISRC")
       tags.comment = value("COMMENT", "DESCRIPTION")
+      tags.bpm = value("BPM", "TEMPO")
+      tags.key = value("INITIALKEY", "KEY")
     }
     let pictures = blocks.filter { $0.type == 6 }.compactMap { parsePicture($0.body) }
     if let art = (pictures.first { $0.type == 3 } ?? pictures.first)?.data, !art.isEmpty { tags.artwork = art }

@@ -71,6 +71,9 @@ final class AppSettings {
         static let identifyOnAdd = "identifyOnAdd"
         static let renameOnApply = "renameOnApply"
         static let autoApplyMatches = "autoApplyMatches"
+        // Named for when it only ran on add; kept so the saved value stays.
+        static let detectBPMKey = "detectBPMKeyOnAdd"
+        static let keyTag = "keyTag"
         // Before Process (read once, to seed `lastRecipe`).
         static let saveFormat = "saveFormat"
         static let defaultStemModel = "defaultStemModel"
@@ -112,6 +115,17 @@ final class AppSettings {
         didSet { defaults.set(autoApplyMatches, forKey: Key.autoApplyMatches) }
     }
 
+    /// Detect BPM and key: on every dropped track, on showing one that
+    /// hasn't been, and before a Process run or Apply writes tags.
+    var detectBPMKey: Bool {
+        didSet { defaults.set(detectBPMKey, forKey: Key.detectBPMKey) }
+    }
+
+    /// How a written key tag is spelled.
+    var keyTag: KeyTagStyle {
+        didSet { defaults.set(keyTag.rawValue, forKey: Key.keyTag) }
+    }
+
     var loudnessTarget: DJLoudnessTarget { DJLoudnessTarget(lufs: targetLUFS, ceilingDBTP: ceilingDBTP) }
 
     /// −6 … −16 LUFS in 1 dB steps. Club masters sit around −6 to −9; −14 is streaming level.
@@ -146,9 +160,23 @@ final class AppSettings {
         identifyOnAdd = defaults.object(forKey: Key.identifyOnAdd) as? Bool ?? true
         renameOnApply = defaults.object(forKey: Key.renameOnApply) as? Bool ?? true
         autoApplyMatches = defaults.bool(forKey: Key.autoApplyMatches)
+        detectBPMKey = defaults.object(forKey: Key.detectBPMKey) as? Bool ?? true
+        keyTag = defaults.string(forKey: Key.keyTag).flatMap(KeyTagStyle.init) ?? .musical
     }
 
     var isDefaultOutputFolder: Bool {
         outputFolder.standardizedFileURL.path == AppPaths.defaultOutputFolder.standardizedFileURL.path
+    }
+}
+
+/// A key tag's spelling: Rekordbox's "Am" or Camelot's "8A".
+enum KeyTagStyle: String, CaseIterable, Sendable {
+    case musical, camelot
+
+    var title: String {
+        switch self {
+        case .musical: "Musical"
+        case .camelot: "Camelot"
+        }
     }
 }

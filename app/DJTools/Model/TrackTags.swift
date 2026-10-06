@@ -50,12 +50,44 @@ enum TrackTags {
         return tags
     }
 
+    /// `tags` with BPM and key from the track's analysis where `existing`
+    /// (the file's own tags) has none: existing tags always win. BPM is
+    /// folded slow when any of the outgoing genre, the file's and the
+    /// track's (`Track.bpmGenres`) is slow, as the readout does, and left
+    /// out when the tempo isn't steady; the key is spelled as Settings ▸
+    /// Analysis says.
+    static func fillingAnalysis(_ tags: AudioTags, from track: Track, keyTag: KeyTagStyle, existing: AudioTags) -> AudioTags {
+        var filled = tags
+        guard let analysis = track.analysis else { return filled }
+        if !AudioTags.hasBPM(existing.bpm), let tempo = analysis.tempo, tempo.isSteady {
+            filled.bpm = DJBPM.string(tempo.bpm(genres: [tags.genre, existing.genre] + track.bpmGenres))
+        }
+        if existing.key?.trimmed.isEmpty ?? true, let key = analysis.key?.key {
+            filled.key = keyTag == .camelot ? key.camelot : key.musical
+        }
+        return filled
+    }
+
     /// JPEG or PNG bytes from `url`, or nil.
     static func artwork(from url: URL?) async -> Data? {
         guard let url, let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200,
               data.starts(with: [0xFF, 0xD8]) || data.starts(with: [0x89, 0x50, 0x4E, 0x47]) else { return nil }
         return data
+    }
+}
+
+extension AudioTags {
+    /// A BPM tag as a number; nil when missing, zero or not a number.
+    static func bpmValue(_ text: String?) -> Double? {
+        guard let value = text.flatMap({ Double($0.trimmed) }), value > 0 else { return nil }
+        return value
+    }
+
+    /// Any BPM text but "0" counts as a tag (never overwritten).
+    static func hasBPM(_ text: String?) -> Bool {
+        guard let text = text?.trimmed, !text.isEmpty else { return false }
+        return Double(text) != 0
     }
 }
 

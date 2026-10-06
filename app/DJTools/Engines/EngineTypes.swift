@@ -128,6 +128,47 @@ struct DJLoudnessTarget: Sendable, Codable, Equatable, Hashable {
     var ceilingDBTP: Double
 }
 
+// MARK: - AnalysisKit
+
+/// Mirrors `AnalysisKit.MusicalKey`: pitch class 0 = C … 11 = B. Spelling and
+/// parsing come from the package (`RealEngines.swift`).
+struct DJMusicalKey: Sendable, Codable, Hashable {
+    var tonic: Int
+    var isMinor: Bool
+}
+
+/// Mirrors `AnalysisKit.KeyEstimate`.
+struct DJKeyEstimate: Sendable, Codable, Equatable {
+    var key: DJMusicalKey
+    /// How far the best key leads the runner-up (0…1). Debug only.
+    var margin: Double
+}
+
+/// Mirrors `AnalysisKit.TempoEstimate`: raw, folded only for display and tags.
+struct DJTempoEstimate: Sendable, Codable, Equatable {
+    var rawBPM: Double
+    var beatCount: Int
+    /// Coefficient of variation of the beat interval.
+    var stability: Double
+}
+
+/// `AnalysisKit.MusicalAnalyzerError.modelUnavailable`: the tempo model
+/// couldn't be downloaded or checked (offline, server error). Transient: not
+/// remembered per track, the next try sets it up again.
+struct DJAnalysisModelUnavailable: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
+/// Mirrors `AnalysisKit.MusicalAnalysis`.
+struct DJMusicalAnalysis: Sendable, Codable, Equatable {
+    /// Nil: no beats found.
+    var tempo: DJTempoEstimate?
+    /// Nil: silent or atonal.
+    var key: DJKeyEstimate?
+    var duration: TimeInterval
+}
+
 // MARK: - Track ID
 
 /// What Track ID found for a file: Shazam's match, filled in from the Apple

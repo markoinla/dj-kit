@@ -1,3 +1,4 @@
+import AnalysisKit
 import ApolloMLX
 import Foundation
 import LoudnessKit
@@ -167,4 +168,71 @@ struct LoudnessKitAdapter: LoudnessMeasuring {
             resultingTruePeakDBTP: p.resultingTruePeakDBTP
         )
     }
+}
+
+/// `AnalysisKit.MusicalAnalyzer`: one decode, libkeyfinder and Beat This! side
+/// by side. The tempo model lives in `<supportDirectory>/models/beat-this/`
+/// and is downloaded on first use.
+struct AnalysisKitAdapter: MusicalAnalyzing {
+    private let analyzer: MusicalAnalyzer
+
+    init(supportDirectory: URL) {
+        analyzer = MusicalAnalyzer(
+            modelsDirectory: supportDirectory.appending(path: "models/beat-this", directoryHint: .isDirectory)
+        )
+    }
+
+    func analyze(
+        _ url: URL, retryingModel: Bool,
+        progress: @escaping @Sendable (Double) -> Void,
+        status: @escaping @Sendable (String) -> Void
+    ) async throws -> DJMusicalAnalysis {
+        let a: MusicalAnalysis
+        do {
+            a = try await analyzer.analyze(
+                url, retryingModel: retryingModel, progress: MainHop.wrap(progress), status: MainHop.wrap(status))
+        } catch MusicalAnalyzerError.modelUnavailable(let message) {
+            throw DJAnalysisModelUnavailable(message: message)
+        }
+        return DJMusicalAnalysis(
+            tempo: a.tempo.map { DJTempoEstimate(rawBPM: $0.rawBPM, beatCount: $0.beatCount, stability: $0.stability) },
+            key: a.key.map { DJKeyEstimate(key: DJMusicalKey(tonic: $0.key.tonic, isMinor: $0.key.isMinor), margin: $0.margin) },
+            duration: a.duration
+        )
+    }
+
+    func isPrepared() async -> Bool { await analyzer.isPrepared }
+
+    func removeModel() async throws { try await analyzer.removeWeights() }
+}
+
+// AnalysisKit's spelling, parsing and folding, for the app's mirror types
+// (pure functions, so the fakes and the views use them too).
+
+extension DJMusicalKey {
+    private var package: MusicalKey { MusicalKey(tonic: tonic, isMinor: isMinor) }
+    /// "8A".
+    var camelot: String { package.camelot }
+    /// Rekordbox's spelling: "Am", "F#m", "Bb".
+    var musical: String { package.musical }
+
+    /// A key tag as written ("Am", "8A", "1m", …); nil when it isn't one.
+    init?(parsing tag: String) {
+        guard let key = MusicalKey(parsing: tag) else { return nil }
+        self.init(tonic: key.tonic, isMinor: key.isMinor)
+    }
+}
+
+extension DJTempoEstimate {
+    private var package: TempoEstimate { TempoEstimate(rawBPM: rawBPM, beatCount: beatCount, stability: stability) }
+    var isSteady: Bool { package.isSteady }
+
+    /// Halved or doubled into the genres' range: slow when any of them is
+    /// (`BPMRange.forGenres`).
+    func bpm(genres: [String?]) -> Double { package.bpm(in: BPMRange.forGenres(genres)) }
+}
+
+enum DJBPM {
+    /// "124", or "123.5" off a whole number (`BPMFormat`).
+    static func string(_ bpm: Double) -> String { BPMFormat.string(bpm) }
 }
