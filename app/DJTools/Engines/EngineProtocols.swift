@@ -41,21 +41,32 @@ protocol ApolloRepairing: Sendable {
     func reset() async throws
 }
 
-/// The three engines the app runs on.
+/// `LoudnessKit`: `LoudnessAnalyzer.measure(_:progress:)` and
+/// `Normalizer.gain(for:targetLUFS:ceilingDBTP:)`. Measuring decodes the
+/// whole file (about half a second for a 4-minute track), so it isn't part
+/// of the automatic quality check. Cancelled by cancelling the calling task.
+protocol LoudnessMeasuring: Sendable {
+    func measure(_ url: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> DJLoudnessReport
+    func plan(for report: DJLoudnessReport, target: DJLoudnessTarget) -> DJNormalizationPlan
+}
+
+/// The engines the app runs on.
 struct Engines: Sendable {
     var quality: any QualityChecking
     var stems: any StemSeparating
     var apollo: any ApolloRepairing
+    var loudness: any LoudnessMeasuring
     /// True for the fakes: the toolbar says "Demo engines".
     var isFake: Bool
 
-    /// The real engines: QualityKit, StemsKit and ApolloMLX behind their
+    /// The real engines: QualityKit, StemsKit, ApolloMLX and LoudnessKit behind their
     /// adapters (Engines/RealEngines.swift).
     static func real(supportDirectory: URL) -> Engines {
         Engines(
             quality: QualityKitAdapter(),
             stems: StemsKitAdapter(supportDirectory: supportDirectory),
             apollo: ApolloMLXAdapter(supportDirectory: supportDirectory),
+            loudness: LoudnessKitAdapter(),
             isFake: false
         )
     }
@@ -65,6 +76,7 @@ struct Engines: Sendable {
             quality: FakeQualityChecker(speed: speed),
             stems: FakeStemSeparator(speed: speed),
             apollo: FakeApolloRuntime(supportDirectory: supportDirectory, speed: speed),
+            loudness: FakeLoudnessMeter(speed: speed),
             isFake: true
         )
     }

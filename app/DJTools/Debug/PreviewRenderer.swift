@@ -44,6 +44,15 @@ enum PreviewRenderer {
             ("09-track-very-low-source", AnyView(PreviewWindow(model: repairing, selection: [fixtures.burial.id]))),
             ("10-track-repair-as-mp3", AnyView(PreviewWindow(model: repairAsMP3, selection: [fixtures.bicep.id]))),
         ]
+        // Normalize Loudness: measured (−6.2 → −10.0 LUFS) and capped by the ceiling, in a taller window.
+        let normalizing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.normalizeJobs, apollo: .ready, showsJobs: true)
+        let tall: [(String, AnyView)] = [
+            ("15-normalize-measured", AnyView(PreviewWindow(model: busy, selection: [fixtures.ross.id]))),
+            ("16-normalize-capped", AnyView(PreviewWindow(model: busy, selection: [fixtures.floatingPoints.id]))),
+            ("17-normalize-running", AnyView(PreviewWindow(model: normalizing, selection: [fixtures.bicep.id]))),
+            ("18-normalize-multi", AnyView(PreviewWindow(model: busy, selection: [fixtures.floatingPoints.id, fixtures.ross.id, fixtures.fred.id, fixtures.bicep.id]))),
+            ("19-dark-normalize-capped", AnyView(PreviewWindow(model: busy, selection: [fixtures.floatingPoints.id]))),
+        ]
         shots.append(contentsOf: [
             ("11-dark-track-low-quality", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id]))),
             ("12-dark-queue", AnyView(PreviewWindow(model: queue, selection: [fixtures.bicep.id]))),
@@ -55,9 +64,13 @@ enum PreviewRenderer {
             let dark = name.contains("-dark-")
             render(view, dark: dark, to: directory.appending(path: "\(name).png"))
         }
+        for (name, view) in tall {
+            render(view, dark: name.contains("-dark-"), size: CGSize(width: size.width, height: 1_040),
+                   to: directory.appending(path: "\(name).png"))
+        }
     }
 
-    private static func render(_ view: AnyView, dark: Bool, to url: URL) {
+    private static func render(_ view: AnyView, dark: Bool, size: CGSize = size, to url: URL) {
         let content = view
             .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, dark ? .dark : .light)
@@ -251,17 +264,33 @@ struct PreviewFixtures {
                                      })),
                         finishedAt: now.addingTimeInterval(-3_600)),
         ]
+        // Quiet and dynamic: reaching −10 LUFS would clip, so the plan stops at the ceiling.
+        fp.loudness = DJLoudnessReport(integratedLUFS: -15.3, truePeakDBTP: -3.0, samplePeakDBFS: -3.2,
+                                       loudnessRangeLU: 9.4, duration: 653, sampleRate: 44_100, channels: 2)
         floatingPoints = fp
         overmono = track("Overmono - So U Kno.mp3", .lowQuality, bitrate: 128, cutoff: 16_000, duration: 312,
                          size: 5_010_000, summary: "Cuts off at 16 kHz — likely a 128 kbps MP3")
         fred = track("Fred again.. - Delilah (pull me out of this).wav", .fakeLossless, bitrate: 1411, cutoff: 16_100,
                      duration: 268, size: 47_300_000, summary: "Cuts off at 16 kHz — a lossy file saved as WAV")
-        ross = track("Ross From Friends - Talk To Me You'll Understand.m4a", .goodLossy, bitrate: 256, cutoff: 19_500,
-                     duration: 401, size: 12_800_000, summary: "Cuts off at 19.5 kHz — a good 256 kbps encode")
+        var rff = track("Ross From Friends - Talk To Me You'll Understand.m4a", .goodLossy, bitrate: 256, cutoff: 19_500,
+                        duration: 401, size: 12_800_000, summary: "Cuts off at 19.5 kHz — a good 256 kbps encode")
+        // A loud club master: comes down 3.8 dB.
+        rff.loudness = DJLoudnessReport(integratedLUFS: -6.2, truePeakDBTP: 0.4, samplePeakDBFS: 0,
+                                        loudnessRangeLU: 4.1, duration: 401, sampleRate: 44_100, channels: 2)
+        ross = rff
         kettama = track("Kettama - It Gets Better.aiff", nil, bitrate: nil, cutoff: nil, duration: 0,
                         size: 61_000_000, summary: "")
-        bicep = track("Bicep - Glue (Original Mix).mp3", .lowQuality, bitrate: 160, cutoff: 16_500, duration: 269,
-                      size: 5_400_000, summary: "Cuts off at 16.5 kHz — likely a 160 kbps MP3")
+        var glue = track("Bicep - Glue (Original Mix).mp3", .lowQuality, bitrate: 160, cutoff: 16_500, duration: 269,
+                         size: 5_400_000, summary: "Cuts off at 16.5 kHz — likely a 160 kbps MP3")
+        glue.loudness = DJLoudnessReport(integratedLUFS: -8.7, truePeakDBTP: -0.2, samplePeakDBFS: -0.4,
+                                         loudnessRangeLU: 5.2, duration: 269, sampleRate: 44_100, channels: 2)
+        let normalizedPlan = DJNormalizationPlan.pureGain(for: glue.loudness!, target: DJLoudnessTarget(lufs: -10, ceilingDBTP: -1))
+        glue.results = [
+            TrackResult(kind: .normalized(output: URL.musicDirectory.appending(path: "DJ Tools/\(glue.name) (Normalized).aiff"),
+                                          plan: normalizedPlan),
+                        finishedAt: now.addingTimeInterval(-600)),
+        ]
+        bicep = glue
         burial = track("Burial - Archangel (old rip).mp3", .lowQuality, bitrate: 64, cutoff: 11_000, duration: 238,
                        size: 1_900_000, summary: "MP3 64 kbps, cuts off at 11.0 kHz — low quality")
     }
@@ -287,6 +316,16 @@ struct PreviewFixtures {
         var repair = job(burial, .repair, .running, progress: 0.31)
         repair.statusText = "Repairing"
         return [repair, job(bicep, .stems(.htdemucs), .queued)]
+    }
+
+    /// A normalize running beside a separation, one waiting.
+    var normalizeJobs: [Job] {
+        let target = DJLoudnessTarget(lufs: -10, ceilingDBTP: -1)
+        var normalizing = job(bicep, .normalize(target), .running, progress: 0.58)
+        normalizing.statusText = "Saving AIFF"
+        return [job(fred, .stems(.htdemucs), .running, progress: 0.42),
+                normalizing,
+                job(ross, .normalize(target), .queued)]
     }
 
     /// Everything the queue panel can show.

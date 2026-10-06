@@ -10,9 +10,30 @@ import Foundation
 /// " (Repaired)", …) and the scratch folder is removed, however the job ends.
 ///
 /// Final names: `<out>/<track> (Stems)/<stem>.<ext>` (replacing an earlier
-/// folder, as StemsKit does) and `<out>/<track> (Apollo).<ext>` (numbered
-/// when taken). Used by `AppModel` and `-selfTest`.
+/// folder, as StemsKit does), `<out>/<track> (Apollo).<ext>` and
+/// `<out>/<track> (Normalized).<ext>` (numbered when taken). Used by
+/// `AppModel` and `-selfTest`.
+///
+/// Normalizing is LoudnessKit's measurement plus one gain change applied by
+/// AudioExport while it encodes: no limiter, no compression, and no scratch
+/// file (the source is decoded straight into the encoder).
 enum ResultWriter {
+    /// A saved file and, when it was normalized, the measurement and plan.
+    struct Saved: Sendable {
+        var url: URL
+        var loudness: DJLoudnessReport?
+        var plan: DJNormalizationPlan?
+    }
+
+    /// "Also normalize repaired tracks": the target and the meter.
+    struct NormalizeStep: Sendable {
+        var target: DJLoudnessTarget
+        var meter: any LoudnessMeasuring
+    }
+
+    /// How much of a normalize job's progress bar measuring gets.
+    static let measureShare = 0.25
+
     /// How much of the job's progress bar the engine gets; saving takes the rest.
     static func engineShare(_ format: AudioFileFormat) -> Double {
         format.isLossless ? 0.97 : 0.9
@@ -63,33 +84,84 @@ enum ResultWriter {
         }))
     }
 
+    /// Repairs with Apollo and saves `<out>/<track> (Apollo).<ext>`; with
+    /// `normalize`, Apollo's output is measured and the plan's gain applied
+    /// as it's saved (the last step, so the repair itself is untouched).
     static func repair(
         input: URL, format: AudioFileFormat, outputFolder: URL,
-        engine: any ApolloRepairing,
+        engine: any ApolloRepairing, normalize: NormalizeStep? = nil,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
-    ) async throws -> URL {
+    ) async throws -> Saved {
         let scratch = try scratchFolder(near: outputFolder)
         defer { try? FileManager.default.removeItem(at: scratch) }
-        let share = engineShare(format)
+        let measuring = normalize == nil ? 0 : 0.03
+        let share = engineShare(format) - measuring
         let trackName = input.deletingPathExtension().lastPathComponent
+        let onStatus = MainHop.wrap(status)
 
         let raw = try await engine.repair(
             input: input, output: scratch.appending(path: "\(trackName) (Apollo).wav"),
             progress: { progress($0 * share) }, status: status
         )
         try Task.checkCancellation()
-        MainHop.wrap(status)("Saving \(format.shortTitle)")
+
+        var report: DJLoudnessReport?
+        var plan: DJNormalizationPlan?
+        if let normalize {
+            onStatus("Measuring loudness")
+            let measured = try await normalize.meter.measure(raw, progress: { progress(share + measuring * $0) })
+            try Task.checkCancellation()
+            report = measured
+            plan = normalize.meter.plan(for: measured, target: normalize.target)
+        }
+        let base = share + measuring
+        onStatus("Saving \(format.shortTitle)")
 
         let tags = format.writesTags ? await AudioTags.read(from: input) : nil
         let destination = AppModel.unique(outputFolder.appending(path: "\(trackName) (Apollo).\(format.fileExtension)"))
         let onMain = MainHop.wrap(progress)
-        return try await AudioExporter.export(
+        let url = try await AudioExporter.export(
             raw, to: destination, format: format,
             tags: tags?.suffixingTitle(" (Repaired)", fallbackTitle: trackName),
+            gainDB: plan?.gainDB ?? 0,
             removingSource: true,
-            progress: { onMain(share + (1 - share) * $0) }
+            progress: { onMain(base + (1 - base) * $0) }
         )
+        return Saved(url: url, loudness: report, plan: plan)
+    }
+
+    /// Measures `input`, then saves `<out>/<track> (Normalized).<ext>` with
+    /// the plan's gain: the target loudness, or less when the true peak
+    /// would pass the ceiling. Tags copied, title suffixed " (Normalized)".
+    /// The original is never touched.
+    static func normalize(
+        input: URL, target: DJLoudnessTarget, format: AudioFileFormat, outputFolder: URL,
+        engine: any LoudnessMeasuring,
+        progress: @escaping @Sendable (Double) -> Void,
+        status: @escaping @Sendable (String) -> Void
+    ) async throws -> Saved {
+        let onStatus = MainHop.wrap(status)
+        onStatus("Measuring")
+        let report = try await engine.measure(input, progress: { progress($0 * measureShare) })
+        try Task.checkCancellation()
+        guard !report.isSilent else {
+            throw AppError("This track is silent (below −70 LUFS), so there's nothing to normalize.")
+        }
+        let plan = engine.plan(for: report, target: target)
+        onStatus("Saving \(format.shortTitle)")
+
+        let trackName = input.deletingPathExtension().lastPathComponent
+        let tags = format.writesTags ? await AudioTags.read(from: input) : nil
+        let destination = AppModel.unique(outputFolder.appending(path: "\(trackName) (Normalized).\(format.fileExtension)"))
+        let onMain = MainHop.wrap(progress)
+        let url = try await AudioExporter.export(
+            input, to: destination, format: format,
+            tags: tags?.suffixingTitle(" (Normalized)", fallbackTitle: trackName),
+            gainDB: plan.gainDB,
+            progress: { onMain(measureShare + (1 - measureShare) * $0) }
+        )
+        return Saved(url: url, loudness: report, plan: plan)
     }
 
     /// A fresh folder for the engine's WAVs: on the output folder's volume when

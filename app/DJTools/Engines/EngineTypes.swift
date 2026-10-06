@@ -94,3 +94,36 @@ enum DJApolloSetupState: Sendable, Equatable {
         return false
     }
 }
+
+// MARK: - LoudnessKit
+
+/// Mirrors `LoudnessKit.LoudnessReport` (BS.1770-4 / EBU R128). Silence is
+/// `-infinity` (`LibraryStore` writes it as a string).
+struct DJLoudnessReport: Sendable, Codable, Equatable {
+    var integratedLUFS: Double
+    var truePeakDBTP: Double
+    var samplePeakDBFS: Double
+    var loudnessRangeLU: Double?
+    var duration: TimeInterval
+    var sampleRate: Double
+    var channels: Int
+
+    var isSilent: Bool { !integratedLUFS.isFinite }
+}
+
+/// Mirrors `LoudnessKit.NormalizationPlan`: a pure gain change, capped so the
+/// true peak stays at or below the ceiling.
+struct DJNormalizationPlan: Sendable, Codable, Equatable {
+    var targetLUFS: Double
+    var ceilingDBTP: Double
+    var gainDB: Double
+    var limitedByCeiling: Bool
+    var resultingLUFS: Double
+    var resultingTruePeakDBTP: Double
+}
+
+/// Where normalization aims: Settings' target loudness and true-peak ceiling.
+struct DJLoudnessTarget: Sendable, Codable, Equatable, Hashable {
+    var lufs: Double
+    var ceilingDBTP: Double
+}

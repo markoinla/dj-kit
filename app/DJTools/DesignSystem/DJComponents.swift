@@ -478,6 +478,30 @@ enum DJFormat {
         }
     }
 
+    /// "−6.2" / "+3.8" / "0.0": a typographic minus, "+" only with `plus`.
+    static func signed(_ value: Double, decimals: Int = 1, plus: Bool = false) -> String {
+        guard value.isFinite else { return value < 0 ? "−∞" : "∞" }
+        let text = String(format: "%.\(decimals)f", abs(value))
+        let isZero = Double(text) == 0
+        if value < 0, !isZero { return "−" + text }
+        return plus && !isZero ? "+" + text : text
+    }
+
+    /// "−6.2 LUFS"; `decimals: 0` for targets ("−10 LUFS").
+    static func lufs(_ value: Double, decimals: Int = 1) -> String {
+        value.isFinite ? "\(signed(value, decimals: decimals)) LUFS" : "Silent"
+    }
+
+    /// "−0.3 dBTP", "+0.4 dBTP" (over full scale gets its sign).
+    static func dBTP(_ value: Double) -> String {
+        "\(signed(value, plus: true)) dBTP"
+    }
+
+    /// A gain change: "+3.8 dB", "−1.5 dB", "0.0 dB".
+    static func gain(_ dB: Double) -> String {
+        "\(signed(dB, plus: true)) dB"
+    }
+
     /// A path with the home folder as "~".
     static func path(_ url: URL) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path

@@ -17,7 +17,9 @@ struct ApolloSetupRequest: Identifiable, Equatable {
 /// The app's state: dropped tracks, the job queue and Apollo's setup.
 ///
 /// Jobs: quality checks start straight away, up to `maxConcurrentChecks`
-/// at once. Stems and Apollo repairs are heavy (each peaks around 6 GB) and
+/// at once. Loudness measuring and normalizing decode (and normalizing
+/// re-encodes) the whole file but need little memory: up to
+/// `maxConcurrentDecodes` at once, beside everything else. Stems and Apollo repairs are heavy (each peaks around 6 GB) and
 /// run strictly one at a time *across both kinds*, in the order they were
 /// asked for: `heavyInFlight` is a single slot shared by every heavy job and
 /// is only released when the job's task has returned, so a cancelled job
@@ -39,6 +41,7 @@ final class AppModel {
     let engines: Engines
 
     static let maxConcurrentChecks = 4
+    static let maxConcurrentDecodes = 2
 
     @ObservationIgnored private let store: LibraryStore?
     @ObservationIgnored private var tasks: [Job.ID: Task<Void, Never>] = [:]
@@ -155,6 +158,32 @@ final class AppModel {
         if !ids.isEmpty { isShowingJobs = true }
     }
 
+    /// Saves a copy of each track at Settings' target loudness (pure gain,
+    /// capped by the true-peak ceiling) as `format` (Settings' choice when nil).
+    func normalize(_ ids: [Track.ID], format: AudioFileFormat? = nil) {
+        let format = format ?? settings.normalizeFormat
+        let target = settings.loudnessTarget
+        for id in ids { enqueue(.normalize(target), for: id, format: format) }
+        if !ids.isEmpty { isShowingJobs = true }
+    }
+
+    /// Measures loudness for the Normalize card, once per track (not again
+    /// after a failure until asked).
+    func measureLoudnessIfNeeded(_ ids: [Track.ID]) {
+        for id in ids {
+            guard let track = track(id), track.loudness == nil, track.loudnessError == nil, track.fileExists,
+                  job(for: id, kind: .loudness)?.state.isActive != true,
+                  job(for: id, kind: .normalize(settings.loudnessTarget))?.state.isActive != true
+            else { continue }
+            enqueue(.loudness, for: id)
+        }
+    }
+
+    func measureLoudnessAgain(_ id: Track.ID) {
+        updateTrack(id) { $0.loudness = nil; $0.loudnessError = nil }
+        enqueue(.loudness, for: id)
+    }
+
     /// Repairs with Apollo, saved as `format` (Settings' choice when nil), or
     /// first asks to set Apollo up.
     func repair(_ ids: [Track.ID], format: AudioFileFormat? = nil) {
@@ -182,9 +211,10 @@ final class AppModel {
         jobs.last { $0.trackID == trackID && $0.kind.sameTool(as: kind) }
     }
 
-    /// The running or queued job shown on a track's sidebar row: heavy first.
+    /// The running or queued job shown on a track's sidebar row: heavy first
+    /// (a loudness measurement for the detail pane isn't shown).
     func activeJob(for trackID: Track.ID) -> Job? {
-        let active = jobs.filter { $0.trackID == trackID && $0.state.isActive }
+        let active = jobs.filter { $0.trackID == trackID && $0.state.isActive && $0.kind != .loudness }
         return active.first { $0.kind.isHeavy && $0.state == .running }
             ?? active.first { $0.state == .running }
             ?? active.first
@@ -194,11 +224,12 @@ final class AppModel {
     var activeHeavyJobs: [Job] { jobs.filter { $0.kind.isHeavy && $0.state.isActive } }
     var runningHeavyJob: Job? { jobs.first { $0.kind.isHeavy && $0.state == .running } }
 
-    /// What the queue panel lists: heavy jobs, and quality checks only while
-    /// they run or when they failed (a dropped folder would bury the rest).
+    /// What the queue panel lists: stems, repairs and normalizing, and
+    /// quality checks and measurements only while they run or when they
+    /// failed (a dropped folder would bury the rest).
     var visibleJobs: [Job] {
         jobs.filter { job in
-            job.kind.isHeavy || job.state == .running || { if case .failed = job.state { return true } else { return false } }()
+            !job.kind.isBackground || job.state == .running || { if case .failed = job.state { return true } else { return false } }()
         }
     }
 
@@ -231,7 +262,8 @@ final class AppModel {
         switch job.kind {
         case .repair: repair([job.trackID], format: job.format)
         case .quality: checkQuality([job.trackID])
-        case .stems: enqueue(job.kind, for: job.trackID, format: job.format)
+        case .loudness: measureLoudnessAgain(job.trackID)
+        case .stems, .normalize: enqueue(job.kind, for: job.trackID, format: job.format)
         }
     }
 
@@ -245,10 +277,14 @@ final class AppModel {
         pump()
     }
 
-    /// Starts what can start: checks up to the limit, one heavy job.
+    /// Starts what can start: checks and decodes up to their limits, one heavy job.
     private func pump() {
         let runningChecks = jobs.filter { $0.kind == .quality && $0.state == .running }.count
         for job in jobs.filter({ $0.kind == .quality && $0.state == .queued }).prefix(max(0, Self.maxConcurrentChecks - runningChecks)) {
+            start(job.id)
+        }
+        let runningDecodes = jobs.filter { $0.kind.isDecoding && $0.state == .running }.count
+        for job in jobs.filter({ $0.kind.isDecoding && $0.state == .queued }).prefix(max(0, Self.maxConcurrentDecodes - runningDecodes)) {
             start(job.id)
         }
         if heavyInFlight == nil, let next = jobs.first(where: { $0.kind.isHeavy && $0.state == .queued }) {
@@ -260,7 +296,7 @@ final class AppModel {
     private func start(_ id: Job.ID) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         jobs[index].state = .running
-        jobs[index].progress = jobs[index].kind.isHeavy ? 0 : nil
+        jobs[index].progress = jobs[index].kind == .quality ? nil : 0
         let job = jobs[index]
         tasks[id] = Task { await self.run(job) }
     }
@@ -327,13 +363,37 @@ final class AppModel {
                 finish(job.id, .finished, result: folder)
 
             case .repair:
-                let written = try await ResultWriter.repair(
+                let normalize = settings.normalizeRepairs
+                    ? ResultWriter.NormalizeStep(target: settings.loudnessTarget, meter: engines.loudness) : nil
+                let saved = try await ResultWriter.repair(
                     input: track.url, format: job.format ?? settings.repairFormat,
-                    outputFolder: try outputFolder(), engine: engines.apollo, progress: progress, status: status
+                    outputFolder: try outputFolder(), engine: engines.apollo, normalize: normalize,
+                    progress: progress, status: status
                 )
                 guard isRunning(job.id) else { return }
-                updateTrack(track.id) { $0.results.append(TrackResult(kind: .repaired(output: written))) }
-                finish(job.id, .finished, result: written)
+                updateTrack(track.id) {
+                    $0.results.append(TrackResult(kind: .repaired(output: saved.url, normalization: saved.plan)))
+                }
+                finish(job.id, .finished, result: saved.url)
+
+            case .loudness:
+                let report = try await engines.loudness.measure(track.url, progress: progress)
+                guard isRunning(job.id) else { return }
+                updateTrack(track.id) { $0.loudness = report; $0.loudnessError = nil }
+                finish(job.id, .finished)
+
+            case .normalize(let target):
+                let saved = try await ResultWriter.normalize(
+                    input: track.url, target: target, format: job.format ?? settings.normalizeFormat,
+                    outputFolder: try outputFolder(), engine: engines.loudness, progress: progress, status: status
+                )
+                guard isRunning(job.id), let plan = saved.plan else { return }
+                updateTrack(track.id) {
+                    $0.loudness = saved.loudness
+                    $0.loudnessError = nil
+                    $0.results.append(TrackResult(kind: .normalized(output: saved.url, plan: plan)))
+                }
+                finish(job.id, .finished, result: saved.url)
             }
         } catch is CancellationError {
             finish(job.id, .cancelled)
@@ -341,6 +401,7 @@ final class AppModel {
             guard isRunning(job.id) else { return }
             let message = error.localizedDescription
             if job.kind == .quality { updateTrack(track.id) { $0.qualityError = message } }
+            if job.kind == .loudness { updateTrack(track.id) { $0.loudnessError = message } }
             finish(job.id, .failed(message))
         }
     }

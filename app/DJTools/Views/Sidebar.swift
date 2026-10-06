@@ -167,6 +167,9 @@ struct TrackMenu: View {
         Button(ids.count > 1 ? "Repair \(ids.count) Tracks with Apollo" : "Repair with Apollo") {
             model.repair(ids)
         }
+        Button(ids.count > 1 ? "Normalize \(ids.count) Tracks' Loudness" : "Normalize Loudness") {
+            model.normalize(ids)
+        }
         Divider()
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting(ids.compactMap { model.track($0)?.url })
