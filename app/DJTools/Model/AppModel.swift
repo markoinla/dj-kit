@@ -210,7 +210,12 @@ final class AppModel {
                     let written = await AudioTags.read(from: url)
                     updateTrack(id) {
                         $0.url = url
-                        if $0.analysis != nil { $0.fileTags = FileMusicalTags(written) }
+                        if $0.analysis != nil {
+                            // The file's own genre still counts for folding after the match's replaced it.
+                            var tags = FileMusicalTags(written)
+                            tags.genre = $0.fileTags?.genre ?? existing.genre
+                            $0.fileTags = tags
+                        }
                         $0.fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
                         $0.identityStatus = .applied
                     }

@@ -226,8 +226,9 @@ extension DJTempoEstimate {
     private var package: TempoEstimate { TempoEstimate(rawBPM: rawBPM, beatCount: beatCount, stability: stability) }
     var isSteady: Bool { package.isSteady }
 
-    /// Halved or doubled into the genre's range (`BPMRange.forGenre`).
-    func bpm(genre: String?) -> Double { package.bpm(in: BPMRange.forGenre(genre)) }
+    /// Halved or doubled into the genres' range: slow when any of them is
+    /// (`BPMRange.forGenres`).
+    func bpm(genres: [String?]) -> Double { package.bpm(in: BPMRange.forGenres(genres)) }
 }
 
 enum DJBPM {

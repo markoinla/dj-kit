@@ -7,7 +7,7 @@ The app talks to the packages only through five protocols in
 clashes). Only `RealEngines.swift` imports QualityKit, StemsKit, ApolloMLX,
 LoudnessKit and AnalysisKit; it also gives the mirror types AnalysisKit's pure
 helpers (`DJMusicalKey.camelot` / `.musical` / `init?(parsing:)`,
-`DJTempoEstimate.isSteady` / `bpm(genre:)`, `DJBPM.string`), which the fakes
+`DJTempoEstimate.isSteady` / `bpm(genres:)`, `DJBPM.string`), which the fakes
 and views use too.
 
 | Protocol | Adapter (`RealEngines.swift`) | Package API |
@@ -54,8 +54,8 @@ default, WAV, FLAC, MP3 320/256/192); Demucs separates the same audio and
 each stem is saved with the same gain. Tags: the source's plus the Track ID
 match, title unsuffixed on the finished track (" (Vocals)" … on stems), and
 "Repaired · −10.0 LUFS" appended to the comment, plus the detected BPM and
-key where the source has none (`TrackTags.fillingAnalysis`: BPM folded for the
-genre the file is written with, only for a steady tempo; key spelled per Settings ▸ Analysis; existing
+key where the source has none (`TrackTags.fillingAnalysis`: BPM folded slow when
+the file's or Track ID's genre is slow, only for a steady tempo; key spelled per Settings ▸ Analysis; existing
 tags always win). Apply writes them into the original under the same rule. Names:
 `<out>/<track>.<ext>` (replaced on a re-run, never over the source) and
 `<out>/<track> (Stems)/<track> (Vocals).<ext>` (replacing an older folder).

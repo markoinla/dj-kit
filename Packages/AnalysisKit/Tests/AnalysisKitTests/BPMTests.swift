@@ -50,6 +50,16 @@ struct BPMTests {
     }
     #expect(BPMRange.forGenre(nil) == BPMRange.standard)
   }
+
+  @Test func genresRange() {
+    #expect(BPMRange.forGenres(["Downtempo", "Electronic"]) == BPMRange.slow)
+    #expect(BPMRange.forGenres(["Electronic", "Downtempo"]) == BPMRange.slow)
+    #expect(BPMRange.forGenres([nil, "Reggae"]) == BPMRange.slow)
+    #expect(BPMRange.forGenres(["House", "Electronic"]) == BPMRange.standard)
+    #expect(BPMRange.forGenres(["Chill House", "Dance"]) == BPMRange.standard)
+    #expect(BPMRange.forGenres([nil, nil]) == BPMRange.standard)
+    #expect(BPMRange.forGenres([]) == BPMRange.standard)
+  }
 }
 
 struct TempoEstimateTests {
