@@ -2,11 +2,12 @@
 
 Native macOS app (SwiftUI) for DJ track prep: stem separation, Apollo repair of lossy
 rips (native MLX port, `Packages/ApolloMLX`; the Python `apollo/` + `ApolloBridge` are kept
-only as the reference), a bad-file detector, and loudness normalization (`Packages/LoudnessKit`,
-BS.1770-4 / EBU R128, pure gain). One Process run per track does repair → normalize → stems and
+only as the reference), a bad-file detector, loudness normalization (`Packages/LoudnessKit`,
+BS.1770-4 / EBU R128, pure gain), and BPM / key detection (`Packages/AnalysisKit`). One Process run per track does repair → normalize → stems and
 saves once ("Artist - Title.aiff", no suffix; steps in the comment tag). Results are saved as AIFF (default), WAV,
 FLAC or MP3 through `Packages/AudioExport`. UI copy stays minimal: labels, no explanations. Personal use; output goes into Rekordbox by hand.
-Rekordbox already does BPM, key and beatgrid, so those are out of scope; its Auto Gain is
+BPM / key are optional (libkeyfinder + Beat This! on MLX) and only fill tags a file doesn't
+already have; beatgrid stays Rekordbox's. Rekordbox's Auto Gain is
 playback-only, which is why Normalize exists (it bakes the level into a copy).
 
 - Module seams: `docs/CONTRACTS.md`. Research: `research/`.
