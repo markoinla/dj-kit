@@ -72,6 +72,7 @@ struct TrackDetailContent: View {
                     }
                     // The suggested repair gets the strong button.
                     .buttonStyle(.dj(lowCount > 0 ? .outline : .primary, fullWidth: true))
+                    .disabled(allBusy(ids, kind: .stems(chosen)))
                 }
 
                 ToolCard(
@@ -103,10 +104,16 @@ struct TrackDetailContent: View {
                         model.repair(targets)
                     }
                     .buttonStyle(.dj(lowCount > 0 ? .accent : .outline, fullWidth: true))
+                    .disabled(allBusy(ids, kind: .repair))
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Every track already has this tool queued or running (the queue ignores repeats anyway).
+    private func allBusy(_ ids: [Track.ID], kind: Job.Kind) -> Bool {
+        ids.allSatisfy { model.job(for: $0, kind: kind)?.state.isActive == true }
     }
 
     /// A gentle heads-up for very low-bitrate or low-sample-rate sources.
