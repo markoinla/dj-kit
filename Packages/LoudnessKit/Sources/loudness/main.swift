@@ -21,7 +21,7 @@ guard !files.isEmpty else {
 }
 
 func rounded(_ value: Double) -> Any {
-    value.isFinite ? (value * 100).rounded() / 100 : "\(value)"
+    value.isFinite ? NSDecimalNumber(string: String(format: "%.2f", value)) : "\(value)"
 }
 
 var failed = false
