@@ -13,6 +13,12 @@ import Foundation
 /// 1. quality check;
 /// 1b. with `-selfTestIdentify`: Track ID (Shazam + Apple Music; needs the
 ///    team-signed build);
+/// 1c. with `-selfTestAnalyze`: BPM and key (the tempo model downloaded
+///    first if needed), then the Apply rule on a copy of the input
+///    (`<out>/apply-check.<ext>`, retagged in place): BPM and key land only
+///    where the file had none. The Process run's outputs must then carry the
+///    file's own BPM / key, else the detected ones (`-selfTestKeyTag camelot`
+///    spells the key 8A; default musical);
 /// 2. one Process run, as the app does it (`ResultWriter.process`): with
 ///    `-selfTestApollo` a repair (Apollo installed first if needed), with
 ///    `-selfTestNormalize` normalizing to `-selfTestTarget` LUFS (default
@@ -161,6 +167,55 @@ enum SelfTest {
             }
         }
 
+        // 1c. BPM and key, with -selfTestAnalyze.
+        let keyTag = LaunchArguments.value("selfTestKeyTag", in: arguments).flatMap(KeyTagStyle.init) ?? .musical
+        var expectedMusical: (bpm: String?, key: String?)?
+        if LaunchArguments.flag("selfTestAnalyze", in: arguments) == true {
+            log("BPM and key…")
+            let status = CallbackRecorder<String>()
+            let progress = CallbackRecorder<Double>()
+            do {
+                let start = clock.now
+                let analysis = try await engines.analyzer.analyze(
+                    input,
+                    progress: { progress.record($0, every: 0.25) { log("analyze \(Int($0 * 100))%") } },
+                    status: { status.record($0, every: 0) { log("analyze status: \($0)") } }
+                )
+                let elapsed = clock.now - start
+                let source = await AudioTags.read(from: input)
+                track.analysis = analysis
+                track.fileTags = FileMusicalTags(source)
+                let filled = TrackTags.fillingAnalysis(source, from: track, keyTag: keyTag, existing: source)
+                expectedMusical = (filled.bpm, filled.key)
+                log("analyze: \(track.musicalReadout ?? "nothing found")\(track.musicalTagMismatch.map { " (\($0))" } ?? "")")
+
+                // Apply's rule, on a copy: only where the file has none.
+                let copy = output.appending(path: "apply-check.\(input.pathExtension)")
+                try? FileManager.default.removeItem(at: copy)
+                try FileManager.default.copyItem(at: input, to: copy)
+                let applied = TrackTags.fillingAnalysis(AudioTags(), from: track, keyTag: keyTag, existing: source)
+                _ = try await AudioRetagger.retag(copy, with: applied)
+                let back = await AudioTags.read(from: copy)
+                let applyOK = back.bpm == filled.bpm && back.key == filled.key
+                result["analyze"] = [
+                    "ok": applyOK, "seconds": seconds(elapsed),
+                    "rawBPM": orNull(analysis.tempo?.rawBPM), "stability": orNull(analysis.tempo?.stability),
+                    "isSteady": orNull(analysis.tempo?.isSteady), "beatCount": orNull(analysis.tempo?.beatCount),
+                    "key": orNull(analysis.key.map { "\($0.key.camelot) \($0.key.musical)" }),
+                    "keyMargin": orNull(analysis.key?.margin), "duration": analysis.duration,
+                    "readout": orNull(track.musicalReadout), "tagMismatch": orNull(track.musicalTagMismatch),
+                    "sourceBPM": orNull(source.bpm), "sourceKey": orNull(source.key), "sourceGenre": orNull(source.genre),
+                    "expectedBPM": orNull(filled.bpm), "expectedKey": orNull(filled.key),
+                    "applyCheck": ["path": copy.path, "bpm": orNull(back.bpm), "key": orNull(back.key)] as [String: Any],
+                    "progress": progress.summary, "status": status.summary,
+                ] as [String: Any]
+                ok = ok && applyOK
+            } catch {
+                ok = false
+                result["analyze"] = ["ok": false, "error": error.localizedDescription]
+            }
+        }
+
         // 2. Process: repair → normalize → stems in one run, as the app does.
         let steps = ResultWriter.Steps(
             repair: withApollo,
@@ -188,7 +243,8 @@ enum SelfTest {
                 let stepChanges = CallbackRecorder<String>()
                 let stepOrder = StepOrder()
                 let start = clock.now
-                let tags = await AudioTags.read(from: input)
+                var tags = await AudioTags.read(from: input)
+                tags = TrackTags.fillingAnalysis(tags, from: track, keyTag: keyTag, existing: tags)
                 let processed = try await ResultWriter.process(
                     input: input, steps: steps, format: format, tags: tags, outputFolder: output, engines: engines,
                     progress: { progress.record($0, every: 0.1) { log("process \(Int($0 * 100))%") } },
@@ -204,7 +260,8 @@ enum SelfTest {
 
                 if let written = files.output {
                     // No suffix: the finished track keeps the source's title.
-                    let check = await checkOutput(written, format: format, expectedDuration: duration, expectedTitle: tags.title ?? input.deletingPathExtension().lastPathComponent)
+                    let check = await checkOutput(written, format: format, expectedDuration: duration, expectedTitle: tags.title ?? input.deletingPathExtension().lastPathComponent,
+                                                  expectedMusical: expectedMusical)
                     step["track"] = check.json
                     stepOK = stepOK && check.ok
                     if let plan = files.normalization, let measured = processed.loudness {
@@ -221,7 +278,7 @@ enum SelfTest {
                     var stemFiles: [String: Any] = [:]
                     for (name, url) in files.stems ?? [:] {
                         let check = await checkOutput(url, format: format, expectedDuration: duration,
-                                                      expectedTitleSuffix: " (\(name.capitalized))")
+                                                      expectedTitleSuffix: " (\(name.capitalized))", expectedMusical: expectedMusical)
                         stemFiles[name] = check.json
                         stepOK = stepOK && check.ok
                     }
@@ -229,7 +286,7 @@ enum SelfTest {
                     stepOK = stepOK && Set((files.stems ?? [:]).keys) == Set(stemsStep.choice.outputs(for: stemsStep.model))
                 }
                 let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: output.path))?
-                    .filter { $0.hasPrefix(".") || $0.hasSuffix(".wav") && format != .wav } ?? []
+                    .filter { $0.hasPrefix(".") || $0.hasSuffix(".wav") && format != .wav && $0 != "apply-check.wav" } ?? []
                 stepOK = stepOK && leftovers.isEmpty
                 // Every step the run does, once each, in order.
                 stepOK = stepOK && stepOrder.entered == steps.order && !stepOrder.wentBack
@@ -310,7 +367,8 @@ enum SelfTest {
     /// MP3, the source's length (± one MP3 frame; skipped for the fakes'
     /// one-second files), and the suffixed title where the format has tags.
     private static func checkOutput(_ url: URL, format: AudioFileFormat, expectedDuration: TimeInterval?,
-                                    expectedTitleSuffix: String = "", expectedTitle: String? = nil) async -> (ok: Bool, json: [String: Any]) {
+                                    expectedTitleSuffix: String = "", expectedTitle: String? = nil,
+                                    expectedMusical: (bpm: String?, key: String?)? = nil) async -> (ok: Bool, json: [String: Any]) {
         var json: [String: Any] = ["path": url.path, "bytes": orNull(fileSize(url))]
         guard url.pathExtension == format.fileExtension else {
             json["error"] = "extension \(url.pathExtension), expected \(format.fileExtension)"
@@ -350,6 +408,9 @@ enum SelfTest {
                 ok = ok && (tags.title?.hasSuffix(expectedTitleSuffix) ?? false)
                 if let expectedTitle { ok = ok && tags.title == expectedTitle }
                 json["comment"] = orNull(tags.comment)
+                json["bpm"] = orNull(tags.bpm)
+                json["key"] = orNull(tags.key)
+                if let expectedMusical { ok = ok && tags.bpm == expectedMusical.bpm && tags.key == expectedMusical.key }
             }
         }
         json["ok"] = ok

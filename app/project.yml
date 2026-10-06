@@ -18,6 +18,8 @@ packages:
     path: ../Packages/AudioExport
   LoudnessKit:
     path: ../Packages/LoudnessKit
+  AnalysisKit:
+    path: ../Packages/AnalysisKit
 
 schemes:
   DJTools:
@@ -92,3 +94,5 @@ targets:
       - package: AudioExport
       - package: LoudnessKit
         product: LoudnessKit
+      - package: AnalysisKit
+        product: AnalysisKit

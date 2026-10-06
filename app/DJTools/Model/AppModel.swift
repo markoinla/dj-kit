@@ -17,7 +17,8 @@ struct ApolloSetupRequest: Identifiable, Equatable {
 /// The app's state: dropped tracks, the job queue and Apollo's setup.
 ///
 /// Jobs: quality checks start straight away, up to `maxConcurrentChecks`
-/// at once. Loudness measuring and normalize-only Process runs decode the
+/// at once; Track ID and BPM / key detection each have their own limit.
+/// Loudness measuring and normalize-only Process runs decode the
 /// whole file but need little memory: up to `maxConcurrentDecodes` at once,
 /// beside everything else. A Process run that repairs or separates is heavy
 /// (Apollo and Demucs each peak around 3–6 GB, one after the other inside the
@@ -42,6 +43,11 @@ final class AppModel {
     static let maxConcurrentDecodes = 2
     /// Track ID lookups at once (network-bound; Apple throttles bursts).
     static let maxConcurrentIdentify = 2
+    /// BPM / key detections at once (a decode and the tempo model on the GPU each).
+    static let maxConcurrentAnalyses = 2
+
+    /// The tempo model is downloaded (Settings ▸ Analysis).
+    private(set) var analysisModelReady = false
 
     /// Tracks whose Track ID match is being written right now.
     private(set) var applying: Set<Track.ID> = []
@@ -97,6 +103,7 @@ final class AppModel {
         save()
         checkQuality(added.map(\.id))
         if settings.identifyOnAdd { identify(added.map(\.id)) }
+        analyzeIfNeeded(added.map(\.id))
         return added.map(\.id)
     }
 
@@ -167,7 +174,8 @@ final class AppModel {
     }
 
     /// Writes each track's match into its file (no re-encoding; other tags
-    /// such as BPM and key stay) and, when Settings says so, renames it
+    /// stay), with the detected BPM and key where the file has none (after
+    /// a pending detection), and, when Settings says so, renames it
     /// "Artist - Title.ext" in its folder. Do this before importing into
     /// Rekordbox: it finds tracks by path.
     func applyIdentity(_ ids: [Track.ID]) {
@@ -182,9 +190,12 @@ final class AppModel {
             var failures: [String] = []
             for id in targets {
                 defer { applying.remove(id) }
+                try? await waitForAnalysis(id)
                 guard let track = track(id), let identity = track.identity else { continue }
                 do {
-                    let tags = await TrackTags.tags(for: identity)
+                    let existing = await AudioTags.read(from: track.url)
+                    let tags = TrackTags.fillingAnalysis(
+                        await TrackTags.tags(for: identity), from: track, keyTag: settings.keyTag, existing: existing)
                     var destination: URL?
                     if rename {
                         let name = TrackTags.fileName(TrackTags.displayName(tags, fallback: track.name))
@@ -194,8 +205,10 @@ final class AppModel {
                         }
                     }
                     let url = try await AudioRetagger.retag(track.url, with: tags, moveTo: destination)
+                    let written = await AudioTags.read(from: url)
                     updateTrack(id) {
                         $0.url = url
+                        if $0.analysis != nil { $0.fileTags = FileMusicalTags(written) }
                         $0.fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
                         $0.identityStatus = .applied
                     }
@@ -248,6 +261,26 @@ final class AppModel {
     func measureLoudnessAgain(_ id: Track.ID) {
         updateTrack(id) { $0.loudness = nil; $0.loudnessError = nil }
         enqueue(.loudness, for: id)
+    }
+
+    /// BPM and key for the Analyze row and the tags, once per track (not
+    /// again after a failure until asked), when Settings says so.
+    func analyzeIfNeeded(_ ids: [Track.ID]) {
+        guard settings.detectBPMKeyOnAdd else { return }
+        for id in ids {
+            guard let track = track(id), track.analysis == nil, track.analysisError == nil, track.fileExists,
+                  !applying.contains(id), job(for: id, kind: .analyze)?.state.isActive != true
+            else { continue }
+            enqueue(.analyze, for: id)
+        }
+    }
+
+    /// Detects BPM and key again after a failure.
+    func analyze(_ ids: [Track.ID]) {
+        for id in ids {
+            updateTrack(id) { $0.analysisError = nil }
+            enqueue(.analyze, for: id)
+        }
     }
 
     // MARK: - Jobs
@@ -334,6 +367,10 @@ final class AppModel {
         }
         let runningIDs = jobs.filter { $0.kind == .identify && $0.state == .running }.count
         for job in jobs.filter({ $0.kind == .identify && $0.state == .queued }).prefix(max(0, Self.maxConcurrentIdentify - runningIDs)) {
+            start(job.id)
+        }
+        let runningAnalyses = jobs.filter { $0.kind == .analyze && $0.state == .running }.count
+        for job in jobs.filter({ $0.kind == .analyze && $0.state == .queued }).prefix(max(0, Self.maxConcurrentAnalyses - runningAnalyses)) {
             start(job.id)
         }
         let runningDecodes = jobs.filter { $0.kind.isDecoding && $0.state == .running }.count
@@ -441,10 +478,25 @@ final class AppModel {
                 updateTrack(track.id) { $0.loudness = report; $0.loudnessError = nil }
                 finish(job.id, .finished)
 
+            case .analyze:
+                let analysis = try await engines.analyzer.analyze(track.url, progress: progress, status: status)
+                let tags = await AudioTags.read(from: track.url)
+                guard isRunning(job.id) else { return }
+                analysisModelReady = true
+                updateTrack(track.id) {
+                    $0.analysis = analysis
+                    $0.analysisError = nil
+                    $0.fileTags = FileMusicalTags(tags)
+                }
+                finish(job.id, .finished)
+
             case .process(let recipe, let target):
                 // The name and the repair suggestion come from Track ID and
                 // the quality check: let this track's finish first.
                 try await waitForChecks(track.id)
+                // BPM and key go into the tags where the file has none.
+                analyzeIfNeeded([track.id])
+                try await waitForAnalysis(track.id)
                 guard let current = self.track(track.id), isRunning(job.id) else { return }
                 let steps = ResultWriter.Steps(
                     repair: recipe.repairs(current),
@@ -456,7 +508,7 @@ final class AppModel {
                 setSteps(job.id, steps.order)
                 let processed = try await ResultWriter.process(
                     input: current.url, steps: steps, format: job.format ?? recipe.format,
-                    tags: await TrackTags.forResults(current), outputFolder: try outputFolder(), engines: engines,
+                    tags: await resultTags(current), outputFolder: try outputFolder(), engines: engines,
                     progress: progress, step: step, status: status
                 )
                 guard isRunning(job.id) else { return }
@@ -475,6 +527,7 @@ final class AppModel {
             if job.kind == .quality { updateTrack(track.id) { $0.qualityError = message } }
             if job.kind == .loudness { updateTrack(track.id) { $0.loudnessError = message } }
             if job.kind == .identify { updateTrack(track.id) { $0.identifyError = message } }
+            if job.kind == .analyze { updateTrack(track.id) { $0.analysisError = message } }
             finish(job.id, .failed(message))
         }
     }
@@ -486,6 +539,22 @@ final class AppModel {
             || jobs.contains(where: { $0.trackID == id && ($0.kind == .quality || $0.kind == .identify) && $0.state.isActive }) {
             try await Task.sleep(for: .milliseconds(250))
         }
+    }
+
+    /// Waits for this track's BPM / key detection when one is queued (it
+    /// starts straight away, ahead of the line) or running.
+    private func waitForAnalysis(_ id: Track.ID) async throws {
+        if let job = job(for: id, kind: .analyze), job.state == .queued { start(job.id) }
+        while job(for: id, kind: .analyze)?.state.isActive == true {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
+    /// A Process run's tags: the file's and the match (`TrackTags.forResults`),
+    /// plus the detected BPM and key where the file has none.
+    private func resultTags(_ track: Track) async -> AudioTags {
+        let tags = await TrackTags.forResults(track)
+        return TrackTags.fillingAnalysis(tags, from: track, keyTag: settings.keyTag, existing: tags)
     }
 
     private func outputFolder() throws -> URL {
@@ -555,6 +624,23 @@ final class AppModel {
             notice = "Couldn't remove the repair model: \(error.localizedDescription)"
         }
         apolloState = await engines.apollo.state()
+    }
+
+    // MARK: - Analysis model
+
+    func refreshAnalysisModel() async {
+        analysisModelReady = await engines.analyzer.isPrepared()
+    }
+
+    /// Settings ▸ Analysis ▸ Remove Model: stops detections and deletes the tempo model.
+    func removeAnalysisModel() async {
+        for job in jobs where job.state.isActive && job.kind == .analyze { cancel(job.id) }
+        do {
+            try await engines.analyzer.removeModel()
+        } catch {
+            notice = "Couldn't remove the tempo model: \(error.localizedDescription)"
+        }
+        await refreshAnalysisModel()
     }
 
     func dismissApolloSetup() {

@@ -1,8 +1,8 @@
 import AudioExport
 import Foundation
 
-/// One run of a tool on one track. Quality checks and Track ID are cheap and
-/// run side by side; a Process run that only normalizes decodes the file and
+/// One run of a tool on one track. Quality checks, Track ID and BPM / key
+/// detection are cheap and run side by side; a Process run that only normalizes decodes the file and
 /// runs two at a time; one that repairs or separates stems is heavy and runs
 /// one at a time. A Process run also tracks its steps, for the stepper.
 struct Job: Identifiable, Equatable, Sendable {
@@ -12,6 +12,8 @@ struct Job: Identifiable, Equatable, Sendable {
         case identify
         /// Measure only (the Normalize row's readout).
         case loudness
+        /// BPM and key (the Analyze row's readout, tags where missing).
+        case analyze
         /// Repair → normalize to the target → stems, saved once.
         case process(ProcessRecipe, DJLoudnessTarget)
 
@@ -35,12 +37,13 @@ struct Job: Identifiable, Equatable, Sendable {
         }
 
         /// A check or measurement (no file type).
-        var isBackground: Bool { self == .quality || self == .identify || self == .loudness }
+        var isBackground: Bool { self == .quality || self == .identify || self == .loudness || self == .analyze }
 
         /// Same tool, any options.
         func sameTool(as other: Kind) -> Bool {
             switch (self, other) {
-            case (.quality, .quality), (.identify, .identify), (.loudness, .loudness), (.process, .process): true
+            case (.quality, .quality), (.identify, .identify), (.loudness, .loudness), (.analyze, .analyze),
+                 (.process, .process): true
             default: false
             }
         }

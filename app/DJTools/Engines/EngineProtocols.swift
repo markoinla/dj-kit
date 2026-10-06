@@ -50,17 +50,34 @@ protocol LoudnessMeasuring: Sendable {
     func plan(for report: DJLoudnessReport, target: DJLoudnessTarget) -> DJNormalizationPlan
 }
 
+/// `AnalysisKit.MusicalAnalyzer`: BPM and key from one decode. The first
+/// analysis downloads the tempo model (81 MB) and `status` says so
+/// ("Downloading model…"), then "Analyzing…". Cancelled by cancelling the
+/// calling task.
+protocol MusicalAnalyzing: Sendable {
+    func analyze(
+        _ url: URL,
+        progress: @escaping @Sendable (Double) -> Void,
+        status: @escaping @Sendable (String) -> Void
+    ) async throws -> DJMusicalAnalysis
+    /// The tempo model is downloaded.
+    func isPrepared() async -> Bool
+    /// Settings ▸ Analysis ▸ Remove Model: the next analysis downloads it again.
+    func removeModel() async throws
+}
+
 /// The engines the app runs on.
 struct Engines: Sendable {
     var quality: any QualityChecking
     var stems: any StemSeparating
     var apollo: any ApolloRepairing
     var loudness: any LoudnessMeasuring
+    var analyzer: any MusicalAnalyzing
     var identifier: any TrackIdentifying
     /// True for the fakes: the toolbar says "Demo engines".
     var isFake: Bool
 
-    /// The real engines: QualityKit, StemsKit, ApolloMLX and LoudnessKit behind their
+    /// The real engines: QualityKit, StemsKit, ApolloMLX, LoudnessKit and AnalysisKit behind their
     /// adapters (Engines/RealEngines.swift), and Track ID (Engines/TrackIdentifier.swift).
     static func real(supportDirectory: URL) -> Engines {
         Engines(
@@ -68,6 +85,7 @@ struct Engines: Sendable {
             stems: StemsKitAdapter(supportDirectory: supportDirectory),
             apollo: ApolloMLXAdapter(supportDirectory: supportDirectory),
             loudness: LoudnessKitAdapter(),
+            analyzer: AnalysisKitAdapter(supportDirectory: supportDirectory),
             identifier: ShazamTrackIdentifier(),
             isFake: false
         )
@@ -79,6 +97,7 @@ struct Engines: Sendable {
             stems: FakeStemSeparator(speed: speed),
             apollo: FakeApolloRuntime(supportDirectory: supportDirectory, speed: speed),
             loudness: FakeLoudnessMeter(speed: speed),
+            analyzer: FakeMusicalAnalyzer(supportDirectory: supportDirectory, speed: speed),
             identifier: FakeTrackIdentifier(speed: speed),
             isFake: true
         )

@@ -1,3 +1,4 @@
+import AudioExport
 import Foundation
 
 /// A dropped audio file, its quality report and what the tools made from it.
@@ -21,6 +22,11 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     var identifiedAt: Date?
     var identityStatus: IdentityStatus?
     var identifyError: String?
+    /// BPM and key, raw (folded for display and tags by `bpmGenre`).
+    var analysis: DJMusicalAnalysis?
+    var analysisError: String?
+    /// The file's own BPM, key and genre tags when it was analyzed.
+    var fileTags: FileMusicalTags?
     var results: [TrackResult]
 
     init(url: URL, addedAt: Date = Date(), id: UUID = UUID()) {
@@ -77,6 +83,63 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     }
 
     static let supportedExtensions: Set<String> = ["mp3", "m4a", "aac", "flac", "wav", "aiff", "aif"]
+}
+
+extension Track {
+    /// What BPM is folded for: the file's genre tag, else Track ID's.
+    var bpmGenre: String? {
+        if let genre = fileTags?.genre?.trimmed, !genre.isEmpty { return genre }
+        return identityStatus == .dismissed ? nil : identity?.genre
+    }
+
+    /// The detected BPM, folded; nil before analysis or when no beats were found.
+    var detectedBPM: Double? { analysis?.tempo?.bpm(genre: bpmGenre) }
+
+    /// "124 BPM · 8A · Am" ("~96 BPM" when the tempo isn't steady); what
+    /// was found, nil when nothing was.
+    var musicalReadout: String? {
+        guard let analysis else { return nil }
+        var parts: [String] = []
+        if let tempo = analysis.tempo, let bpm = detectedBPM {
+            parts.append("\(tempo.isSteady ? "" : "~")\(DJBPM.string(bpm)) BPM")
+        }
+        if let key = analysis.key?.key { parts += [key.camelot, key.musical] }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "tag: 123 · 9A · Em": the file's own BPM and key where they disagree
+    /// with what was detected (more than 0.5 BPM apart, another key).
+    var musicalTagMismatch: String? {
+        guard let analysis, let tags = fileTags else { return nil }
+        var parts: [String] = []
+        if let tagged = tags.bpmValue, let bpm = detectedBPM, abs(bpm - tagged) > 0.5 {
+            parts.append(DJBPM.string(tagged))
+        }
+        if let text = tags.key?.trimmed, !text.isEmpty, let detected = analysis.key?.key {
+            if let tagged = DJMusicalKey(parsing: text) {
+                if tagged != detected { parts += [tagged.camelot, tagged.musical] }
+            } else {
+                parts.append(text)
+            }
+        }
+        return parts.isEmpty ? nil : "tag: " + parts.joined(separator: " · ")
+    }
+}
+
+/// A file's own BPM, key and genre tags, as written.
+struct FileMusicalTags: Codable, Sendable, Equatable {
+    var bpm: String?
+    var key: String?
+    var genre: String?
+
+    init(_ tags: AudioTags) {
+        bpm = tags.bpm
+        key = tags.key
+        genre = tags.genre
+    }
+
+    /// The BPM tag as a number; nil when missing, zero or not a number.
+    var bpmValue: Double? { AudioTags.bpmValue(bpm) }
 }
 
 /// Where a track stands, for the sidebar's groups and the detail pane.
