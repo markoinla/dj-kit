@@ -48,7 +48,7 @@ struct ApolloSetupContent: View {
             VStack(spacing: 0) {
                 item("cpu", "Apollo model weights", "From Hugging Face (JusperLee/Apollo), CC BY-SA 4.0. Checked and converted for Apple silicon on this Mac.")
                 DJDivider()
-                item("bolt", "Runs natively on the GPU", "A repair takes about a third of the track's length on an M-series Air (a 4-minute track ≈ 1½ minutes).")
+                item("bolt", "Runs natively on the GPU", "A repair takes about half the track's length or less on an M-series Air (a 4-minute track ≈ 1½–2 minutes).")
                 DJDivider()
                 item("internaldrive", "Kept in Application Support", "~/Library/Application Support/DJTools. Settings ▸ Remove Apollo Model deletes it.")
             }
