@@ -72,6 +72,11 @@ final class AppSettings {
         static let targetLUFS = "targetLUFS"
         static let ceilingDBTP = "truePeakCeilingDBTP"
         static let normalizeRepairs = "normalizeRepairs"
+        static let saveFormat = "saveFormat"
+        static let stemChoice = "stemChoice"
+        static let identifyOnAdd = "identifyOnAdd"
+        static let renameOnApply = "renameOnApply"
+        static let autoApplyMatches = "autoApplyMatches"
     }
 
     var outputFolder: URL {
@@ -80,6 +85,17 @@ final class AppSettings {
 
     var defaultStemModel: DJStemModel {
         didSet { defaults.set(defaultStemModel.rawValue, forKey: Key.defaultStemModel) }
+    }
+
+    /// Settings ▸ General's "Save files as": choosing it sets every tool's
+    /// file type below (each can still be changed on its own).
+    var saveFormat: AudioFileFormat {
+        didSet {
+            defaults.set(saveFormat.rawValue, forKey: Key.saveFormat)
+            stemsFormat = saveFormat
+            repairFormat = saveFormat
+            normalizeFormat = saveFormat
+        }
     }
 
     /// The file type stems are saved as, unless a job picks another.
@@ -113,6 +129,26 @@ final class AppSettings {
         didSet { defaults.set(normalizeRepairs, forKey: Key.normalizeRepairs) }
     }
 
+    /// Which stems a separation keeps, unless a job picks others.
+    var stemChoice: DJStemChoice {
+        didSet { defaults.set(try? JSONEncoder().encode(stemChoice), forKey: Key.stemChoice) }
+    }
+
+    /// Run Track ID on every dropped track.
+    var identifyOnAdd: Bool {
+        didSet { defaults.set(identifyOnAdd, forKey: Key.identifyOnAdd) }
+    }
+
+    /// Apply renames the file "Artist - Title.ext" (in its own folder).
+    var renameOnApply: Bool {
+        didSet { defaults.set(renameOnApply, forKey: Key.renameOnApply) }
+    }
+
+    /// Apply a match without asking when the listens agree and the length fits.
+    var autoApplyMatches: Bool {
+        didSet { defaults.set(autoApplyMatches, forKey: Key.autoApplyMatches) }
+    }
+
     var loudnessTarget: DJLoudnessTarget { DJLoudnessTarget(lufs: targetLUFS, ceilingDBTP: ceilingDBTP) }
 
     /// −8 … −16 LUFS in 1 dB steps. Club masters sit around −6 to −9; −14 is streaming level.
@@ -131,14 +167,20 @@ final class AppSettings {
         outputFolder = defaults.string(forKey: Key.outputFolder).map { URL(filePath: $0, directoryHint: .isDirectory) }
             ?? AppPaths.defaultOutputFolder
         defaultStemModel = defaults.string(forKey: Key.defaultStemModel).flatMap(DJStemModel.init) ?? .htdemucs
-        stemsFormat = defaults.string(forKey: Key.stemsFormat).flatMap(AudioFileFormat.init) ?? Self.defaultFormat
-        repairFormat = defaults.string(forKey: Key.repairFormat).flatMap(AudioFileFormat.init) ?? Self.defaultFormat
-        normalizeFormat = defaults.string(forKey: Key.normalizeFormat).flatMap(AudioFileFormat.init) ?? Self.defaultFormat
+        let save = defaults.string(forKey: Key.saveFormat).flatMap(AudioFileFormat.init) ?? Self.defaultFormat
+        saveFormat = save
+        stemsFormat = defaults.string(forKey: Key.stemsFormat).flatMap(AudioFileFormat.init) ?? save
+        repairFormat = defaults.string(forKey: Key.repairFormat).flatMap(AudioFileFormat.init) ?? save
+        normalizeFormat = defaults.string(forKey: Key.normalizeFormat).flatMap(AudioFileFormat.init) ?? save
         let target = defaults.object(forKey: Key.targetLUFS) as? Double
         targetLUFS = target.flatMap { Self.targetChoices.contains($0) ? $0 : nil } ?? Self.defaultTargetLUFS
         let ceiling = defaults.object(forKey: Key.ceilingDBTP) as? Double
         ceilingDBTP = ceiling.flatMap { Self.ceilingChoices.contains($0) ? $0 : nil } ?? Self.defaultCeilingDBTP
         normalizeRepairs = defaults.bool(forKey: Key.normalizeRepairs)
+        stemChoice = defaults.data(forKey: Key.stemChoice).flatMap { try? JSONDecoder().decode(DJStemChoice.self, from: $0) } ?? .all
+        identifyOnAdd = defaults.object(forKey: Key.identifyOnAdd) as? Bool ?? true
+        renameOnApply = defaults.object(forKey: Key.renameOnApply) as? Bool ?? true
+        autoApplyMatches = defaults.bool(forKey: Key.autoApplyMatches)
     }
 
     var isDefaultOutputFolder: Bool {

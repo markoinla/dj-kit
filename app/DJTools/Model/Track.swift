@@ -14,6 +14,13 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     /// by the automatic quality check: it takes a full decode.
     var loudness: DJLoudnessReport?
     var loudnessError: String?
+    /// Track ID's match (a suggestion until applied), nil when nothing
+    /// matched or it hasn't run.
+    var identity: DJTrackIdentity?
+    /// When Track ID last finished (match or not).
+    var identifiedAt: Date?
+    var identityStatus: IdentityStatus?
+    var identifyError: String?
     var results: [TrackResult]
 
     init(url: URL, addedAt: Date = Date(), id: UUID = UUID()) {
@@ -46,7 +53,25 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
 
     var fileExists: Bool { FileCheck.exists(url) }
 
+    /// A match waiting for Apply or Not This Track.
+    var hasPendingIdentity: Bool { identity != nil && identityStatus == nil }
+
+    /// The match's length is far from the file's: likely another mix or edit
+    /// (the tags are still the song's).
+    var identityLengthMismatch: Bool {
+        guard let expected = identity?.durationSeconds, let actual = quality?.duration, expected > 0, actual > 0 else { return false }
+        return abs(expected - actual) > max(15, 0.08 * actual)
+    }
+
     static let supportedExtensions: Set<String> = ["mp3", "m4a", "aac", "flac", "wav", "aiff", "aif"]
+}
+
+/// What happened to a Track ID match.
+enum IdentityStatus: String, Codable, Sendable {
+    /// Tags written (and the file renamed, when that's on).
+    case applied
+    /// "Not This Track".
+    case dismissed
 }
 
 /// Something a tool wrote for a track.
@@ -88,8 +113,8 @@ extension DJQualityVerdict {
         switch self {
         case .lossless: "Nothing to fix. The highs run all the way up."
         case .goodLossy: "A high-bitrate encode. Fine on a club system."
-        case .lowQuality: "The top end is missing, and it will show on a big system. Apollo can rebuild some of it."
-        case .fakeLossless: "A lossy file re-saved as lossless, so the size lies. Apollo can rebuild some of the highs."
+        case .lowQuality: "The top end is missing, and it will show on a big system. Repair can rebuild some of it."
+        case .fakeLossless: "A lossy file re-saved as lossless, so the size lies. Repair can rebuild some of the highs."
         case .unknown: "The check couldn't tell."
         }
     }

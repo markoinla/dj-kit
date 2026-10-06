@@ -46,7 +46,7 @@ struct WelcomeContent: View {
                 )
                 DJInfoCard(
                     systemImage: "wand.and.stars",
-                    title: "Repair with Apollo",
+                    title: "Repair Audio",
                     message: "Rebuilds the top end of lossy files. Runs on this Mac."
                 )
             }

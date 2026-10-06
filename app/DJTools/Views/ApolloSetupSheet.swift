@@ -34,11 +34,11 @@ struct ApolloSetupContent: View {
                 }
                 .frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Set up Apollo repair")
+                    Text("Set up Repair")
                         .font(.dj(17, weight: 650))
                         .tracking(-0.2)
                         .foregroundStyle(DJColor.foreground)
-                    Text("Apollo runs on this Mac, so it needs a one-time download of about 66 MB. Setup takes a few seconds on a fast connection. After that, repairs work offline.")
+                    Text("Repair runs on this Mac, so it needs a one-time download of about 66 MB. Setup takes a few seconds on a fast connection. After that, repairs work offline.")
                         .djText(.body)
                         .foregroundStyle(DJColor.mutedForeground)
                         .fixedSize(horizontal: false, vertical: true)
@@ -46,11 +46,11 @@ struct ApolloSetupContent: View {
             }
 
             VStack(spacing: 0) {
-                item("cpu", "Apollo model weights", "From Hugging Face (JusperLee/Apollo), CC BY-SA 4.0. Checked and converted for Apple silicon on this Mac.")
+                item("cpu", "Model weights", "From Hugging Face, CC BY-SA 4.0 (see Settings ▸ Credits). Checked and converted for Apple silicon on this Mac.")
                 DJDivider()
                 item("bolt", "Runs natively on the GPU", "A repair takes about half the track's length or less on an M-series Air (a 4-minute track ≈ 1½–2 minutes).")
                 DJDivider()
-                item("internaldrive", "Kept in Application Support", "~/Library/Application Support/DJTools. Settings ▸ Remove Apollo Model deletes it.")
+                item("internaldrive", "Kept in Application Support", "~/Library/Application Support/DJTools. Settings ▸ Repair ▸ Remove Repair Model deletes it.")
             }
             .djCard()
 
@@ -107,7 +107,7 @@ struct ApolloSetupContent: View {
         case .failed(let message):
             DJNotice(kind: .error, message: "Setup didn't finish: \(message)")
         case .ready:
-            DJNotice(kind: .info, message: "Apollo is ready.")
+            DJNotice(kind: .info, message: "Repair is ready.")
         case .notInstalled:
             EmptyView()
         }

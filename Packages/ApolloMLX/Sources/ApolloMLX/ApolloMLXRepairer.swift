@@ -98,7 +98,7 @@ public actor ApolloMLXRepairer {
     try fm.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
     let checkpoint = modelsDirectory.appendingPathComponent("pytorch_model.bin")
     if !fm.fileExists(atPath: checkpoint.path) || (try? Self.sha256(checkpoint)) != Self.checkpointSHA256 {
-      progress("Downloading Apollo weights (66 MB)")
+      progress("Downloading the repair model (66 MB)")
       let (tmp, response) = try await URLSession.shared.download(from: Self.checkpointURL)
       if let http = response as? HTTPURLResponse, http.statusCode != 200 {
         try? fm.removeItem(at: tmp)
@@ -145,7 +145,7 @@ public actor ApolloMLXRepairer {
   private func loadModel(_ precision: ApolloPrecision) throws -> ApolloModel {
     if weights == nil {
       guard isPrepared else {
-        throw ApolloMLXError.badWeights("Apollo weights not prepared (call prepare() first)")
+        throw ApolloMLXError.badWeights("Repair model not prepared (call prepare() first)")
       }
       weights = try loadArrays(url: weightsURL)
     }

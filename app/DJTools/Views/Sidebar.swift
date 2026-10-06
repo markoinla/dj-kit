@@ -160,11 +160,17 @@ struct TrackMenu: View {
     @Binding var selection: Set<Track.ID>
 
     var body: some View {
+        Button(ids.count > 1 ? "Identify \(ids.count) Tracks" : "Identify Track") { model.identify(ids) }
+        let pending = ids.filter { model.track($0)?.hasPendingIdentity == true }
+        if !pending.isEmpty {
+            Button(pending.count > 1 ? "Apply \(pending.count) Track IDs" : "Apply Track ID") { model.applyIdentity(pending) }
+        }
+        Divider()
         Button("Check Quality Again") { model.checkQuality(ids) }
         Button(ids.count > 1 ? "Separate \(ids.count) Tracks' Stems" : "Separate Stems") {
             model.separateStems(ids, model: model.settings.defaultStemModel)
         }
-        Button(ids.count > 1 ? "Repair \(ids.count) Tracks with Apollo" : "Repair with Apollo") {
+        Button(ids.count > 1 ? "Repair \(ids.count) Tracks" : "Repair") {
             model.repair(ids)
         }
         Button(ids.count > 1 ? "Normalize \(ids.count) Tracks' Loudness" : "Normalize Loudness") {

@@ -103,7 +103,7 @@ struct MainView: View {
             .keyboardShortcut("j")
             .help(model.activeJobCount > 0 ? "\(DJFormat.count(model.activeJobCount, "job")) in the queue (⌘J)" : "Show the queue (⌘J)")
             Button("Settings", systemImage: "gearshape") { openSettings() }
-                .help("Output folder, default stem model, Apollo (⌘,)")
+                .help("Output folder, default stem model, repair, loudness (⌘,)")
         }
     }
 }

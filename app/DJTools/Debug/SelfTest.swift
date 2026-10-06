@@ -11,7 +11,10 @@ import Foundation
 /// each peak around 6 GB, never together):
 ///
 /// 1. quality check;
-/// 2. stems with htdemucs (skip with `-selfTestSkipStems`);
+/// 1b. with `-selfTestIdentify`: Track ID (Shazam + Apple Music; needs the
+///    team-signed build);
+/// 2. stems with htdemucs (skip with `-selfTestSkipStems`; `-selfTestAcapella`
+///    keeps only vocals and the instrumental);
 /// 3. with `-selfTestApollo`: Apollo install if needed, then a repair
 ///    (normalized as its last step when `-selfTestNormalize` is given too,
 ///    like Settings' "Also normalize repaired tracks");
@@ -57,7 +60,8 @@ enum SelfTest {
         FileHandle.standardError.write(Data("selfTest: \(line)\n".utf8))
     }
 
-    private static func run(input: URL, output: URL, arguments: [String]) async -> Bool {
+    private static func run(input originalInput: URL, output: URL, arguments: [String]) async -> Bool {
+        var input = originalInput
         let support = AppPaths.support
         let engines = Engines.forLaunch(supportDirectory: support, arguments: arguments)
         let withApollo = LaunchArguments.flag("selfTestApollo", in: arguments) == true
@@ -120,6 +124,44 @@ enum SelfTest {
             result["quality"] = ["ok": false, "error": error.localizedDescription]
         }
 
+        // 1b. Track ID (Shazam + Apple Music), with -selfTestIdentify.
+        if LaunchArguments.flag("selfTestIdentify", in: arguments) == true {
+            log("track ID…")
+            do {
+                let start = clock.now
+                let identity = try await engines.identifier.identify(input, progress: { _ in })
+                let elapsed = clock.now - start
+                if let identity {
+                    log("track ID: \(identity.artist) - \(identity.title) (\(identity.hits)/\(identity.listens))")
+                    // -selfTestApply: write the match into the input and rename it, as Apply does.
+                    if LaunchArguments.flag("selfTestApply", in: arguments) == true {
+                        let tags = await TrackTags.tags(for: identity)
+                        let name = TrackTags.fileName(TrackTags.displayName(tags, fallback: input.deletingPathExtension().lastPathComponent))
+                        let destination = AppModel.unique(input.deletingLastPathComponent().appending(path: "\(name).\(input.pathExtension)"))
+                        input = try await AudioRetagger.retag(input, with: tags, moveTo: destination)
+                        let back = await AudioTags.read(from: input)
+                        log("applied: \(input.lastPathComponent) · \(back.artist ?? "-") / \(back.title ?? "-") / \(back.album ?? "-") / \(back.label ?? "-") / \(back.year ?? "-") / artwork \(back.artwork?.count ?? 0) bytes")
+                        result["applied"] = input.path
+                    }
+                    result["trackID"] = [
+                        "ok": true, "seconds": seconds(elapsed), "matched": true,
+                        "artist": identity.artist, "title": identity.title, "album": orNull(identity.album),
+                        "label": orNull(identity.label), "genre": orNull(identity.genre),
+                        "releaseDate": orNull(identity.releaseDate), "isrc": orNull(identity.isrc),
+                        "durationSeconds": orNull(identity.durationSeconds),
+                        "artworkURL": orNull(identity.artworkURL?.absoluteString),
+                        "hits": identity.hits, "listens": identity.listens,
+                    ] as [String: Any]
+                } else {
+                    log("track ID: no match")
+                    result["trackID"] = ["ok": true, "seconds": seconds(elapsed), "matched": false] as [String: Any]
+                }
+            } catch {
+                ok = false
+                result["trackID"] = ["ok": false, "error": error.localizedDescription]
+            }
+        }
+
         // 2. Stems.
         if !skipStems {
             log("stems (htdemucs, \(format.rawValue))…")
@@ -127,8 +169,10 @@ enum SelfTest {
             let statusLines = CallbackRecorder<String>()
             do {
                 let start = clock.now
+                let choice: DJStemChoice = LaunchArguments.flag("selfTestAcapella", in: arguments) == true ? .acapellaInstrumental : .all
                 let stems = try await ResultWriter.separate(
-                    input: input, model: .htdemucs, format: format, outputFolder: output, engine: engines.stems,
+                    input: input, model: .htdemucs, choice: choice,
+                    format: format, tags: await AudioTags.read(from: input), outputFolder: output, engine: engines.stems,
                     progress: { recorder.record($0, every: 0.1) { log("stems \(Int($0 * 100))%") } },
                     status: { statusLines.record($0, every: 0) { log("stems status: \($0)") } }
                 )
@@ -143,7 +187,7 @@ enum SelfTest {
                 }
                 let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: output.path))?
                     .filter { $0.hasPrefix(".") || $0.hasSuffix(".wav") && format != .wav } ?? []
-                let stepOK = outputsOK && leftovers.isEmpty && Set(stems.stems.keys) == Set(DJStemModel.htdemucs.stemNames)
+                let stepOK = outputsOK && leftovers.isEmpty && Set(stems.stems.keys) == Set(choice.outputs(for: .htdemucs))
                 ok = ok && stepOK
                 result["stems"] = [
                     "ok": stepOK, "model": DJStemModel.htdemucs.modelName, "seconds": seconds(elapsed),
@@ -183,7 +227,7 @@ enum SelfTest {
                 let status = CallbackRecorder<String>()
                 let start = clock.now
                 let saved = try await ResultWriter.repair(
-                    input: input, format: format, outputFolder: output, engine: engines.apollo,
+                    input: input, format: format, tags: await AudioTags.read(from: input), outputFolder: output, engine: engines.apollo,
                     normalize: withNormalize ? ResultWriter.NormalizeStep(target: target, meter: engines.loudness) : nil,
                     progress: { progress.record($0, every: 0.1) { log("repair \(Int($0 * 100))%") } },
                     status: { status.record($0, every: 0) { log("repair status: \($0)") } }
@@ -226,7 +270,7 @@ enum SelfTest {
             do {
                 let start = clock.now
                 let saved = try await ResultWriter.normalize(
-                    input: input, target: target, format: format, outputFolder: output, engine: engines.loudness,
+                    input: input, target: target, format: format, tags: await AudioTags.read(from: input), outputFolder: output, engine: engines.loudness,
                     progress: { progress.record($0, every: 0.1) { log("normalize \(Int($0 * 100))%") } },
                     status: { status.record($0, every: 0) { log("normalize status: \($0)") } }
                 )

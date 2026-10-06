@@ -25,7 +25,7 @@ enum PreviewRenderer {
         let busy = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs)
         let queue = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.queueJobs, showsJobs: true)
         let installing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs,
-                                        apollo: .installing("Downloading Apollo weights (66 MB)"))
+                                        apollo: .installing("Downloading the repair model (66 MB)"))
         let repairing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.repairJobs, apollo: .ready, showsJobs: true)
         // Settings say stems as FLAC and repairs as MP3 320: the format menus and the MP3 hint.
         let repairAsMP3 = fixtures.model(tracks: fixtures.tracks, jobs: [], apollo: .ready, settings: fixtures.mp3Settings)
@@ -306,7 +306,7 @@ struct PreviewFixtures {
     /// A check and a separation running.
     var liveJobs: [Job] {
         [job(kettama, .quality, .running),
-         job(bicep, .stems(.htdemucs), .running, progress: 0.42),
+         job(bicep, .stems(.htdemucs, .all), .running, progress: 0.42),
          job(fred, .repair, .queued)]
     }
 
@@ -315,7 +315,7 @@ struct PreviewFixtures {
     var repairJobs: [Job] {
         var repair = job(burial, .repair, .running, progress: 0.31)
         repair.statusText = "Repairing"
-        return [repair, job(bicep, .stems(.htdemucs), .queued)]
+        return [repair, job(bicep, .stems(.htdemucs, .all), .queued)]
     }
 
     /// A normalize running beside a separation, one waiting.
@@ -323,20 +323,20 @@ struct PreviewFixtures {
         let target = DJLoudnessTarget(lufs: -10, ceilingDBTP: -1)
         var normalizing = job(bicep, .normalize(target), .running, progress: 0.58)
         normalizing.statusText = "Saving AIFF"
-        return [job(fred, .stems(.htdemucs), .running, progress: 0.42),
+        return [job(fred, .stems(.htdemucs, .all), .running, progress: 0.42),
                 normalizing,
                 job(ross, .normalize(target), .queued)]
     }
 
     /// Everything the queue panel can show.
     var queueJobs: [Job] {
-        [job(floatingPoints, .stems(.htdemucsFT), .finished, progress: 1,
+        [job(floatingPoints, .stems(.htdemucsFT, .all), .finished, progress: 1,
              result: URL.musicDirectory.appending(path: "DJ Tools/\(floatingPoints.name) (Stems)")),
-         job(ross, .repair, .failed("Apollo stopped: the model ran out of memory. Close other apps and try again.")),
+         job(ross, .repair, .failed("Repair stopped: the model ran out of memory. Close other apps and try again.")),
          job(kettama, .quality, .running),
-         job(bicep, .stems(.htdemucs), .running, progress: 0.42),
+         job(bicep, .stems(.htdemucs, .all), .running, progress: 0.42),
          job(fred, .repair, .queued),
-         job(overmono, .stems(.htdemucs6s), .queued)]
+         job(overmono, .stems(.htdemucs6s, .all), .queued)]
     }
 
     func model(tracks: [Track], jobs: [Job], apollo: DJApolloSetupState = .notInstalled, showsJobs: Bool = false,
