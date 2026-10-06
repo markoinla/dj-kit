@@ -43,6 +43,15 @@ public actor BeatTracker {
   public static let weightsSHA256 = "f758c77ba5d862cad3718a95705964e9af55298b1fb3544c62c9d79184ea0f2e"
   public static let weightsFileName = "beat-this-final0.safetensors"
 
+  /// Gives up after 15 s without data (a captive portal, a hung server), not the default 60 s;
+  /// the whole download may take up to 10 minutes.
+  static let session: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.timeoutIntervalForRequest = 15
+    config.timeoutIntervalForResource = 600
+    return URLSession(configuration: config)
+  }()
+
   static let chunkFrames = 1500
   static let borderFrames = 6
 
@@ -77,7 +86,7 @@ public actor BeatTracker {
     try fm.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
     if !isPrepared {
       progress("Downloading the tempo model (81 MB)")
-      let (tmp, response) = try await URLSession.shared.download(from: Self.weightsURL)
+      let (tmp, response) = try await Self.session.download(from: Self.weightsURL)
       defer { try? fm.removeItem(at: tmp) }
       if let http = response as? HTTPURLResponse, http.statusCode != 200 {
         throw BeatTrackerError.download("Tempo model download failed: HTTP \(http.statusCode)")

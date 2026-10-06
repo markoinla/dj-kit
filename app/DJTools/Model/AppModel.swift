@@ -57,6 +57,8 @@ final class AppModel {
     /// The heavy job whose task is still running (it may already read as
     /// cancelled while its engine winds down).
     @ObservationIgnored private var heavyInFlight: Job.ID?
+    /// Try Again: these tracks' next analysis retries a model setup that just failed.
+    @ObservationIgnored private var retryModel: Set<Track.ID> = []
     /// Process runs waiting for Apollo's setup to finish.
     @ObservationIgnored private var pendingProcess: [(id: Track.ID, recipe: ProcessRecipe, target: DJLoudnessTarget)] = []
 
@@ -287,9 +289,11 @@ final class AppModel {
     }
 
     /// Detects BPM and key again after a failure (not while its tags are
-    /// being written).
+    /// being written), setting the model up again even right after a
+    /// failed setup.
     func analyze(_ ids: [Track.ID]) {
         for id in ids where !applying.contains(id) {
+            retryModel.insert(id)
             updateTrack(id) { $0.analysisError = nil }
             enqueue(.analyze, for: id)
         }
@@ -491,7 +495,8 @@ final class AppModel {
                 finish(job.id, .finished)
 
             case .analyze:
-                let analysis = try await engines.analyzer.analyze(track.url, progress: progress, status: status)
+                let analysis = try await engines.analyzer.analyze(
+                    track.url, retryingModel: retryModel.remove(track.id) != nil, progress: progress, status: status)
                 let tags = await AudioTags.read(from: track.url)
                 guard isRunning(job.id) else { return }
                 analysisModelReady = true

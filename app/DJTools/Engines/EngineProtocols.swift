@@ -53,11 +53,12 @@ protocol LoudnessMeasuring: Sendable {
 /// `AnalysisKit.MusicalAnalyzer`: BPM and key from one decode. The first
 /// analysis downloads the tempo model (81 MB) and `status` says so
 /// ("Downloading model…"), then "Analyzing…"; when it can't, throws
-/// `DJAnalysisModelUnavailable` (transient). Cancelled by cancelling the
+/// `DJAnalysisModelUnavailable` (transient; for two minutes after, straight
+/// away, unless `retryingModel`: Try Again). Cancelled by cancelling the
 /// calling task.
 protocol MusicalAnalyzing: Sendable {
     func analyze(
-        _ url: URL,
+        _ url: URL, retryingModel: Bool,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
     ) async throws -> DJMusicalAnalysis

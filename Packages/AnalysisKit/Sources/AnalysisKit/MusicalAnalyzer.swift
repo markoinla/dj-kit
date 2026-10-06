@@ -36,11 +36,22 @@ public enum MusicalAnalyzerError: Error, LocalizedError {
 
 public actor MusicalAnalyzer {
   private let tracker: BeatTracker
-  /// The one download or check in flight (or done), shared by concurrent analyses.
+  /// The one download or check in flight (or done), shared by concurrent analyses, and which
+  /// one it is (`waiters` is per setup).
   private var preparing: Task<Void, any Error>?
+  private var generation = 0
   private var prepared = false
-  /// Callers awaiting `preparing`; the last one to give up cancels it.
-  private var waiters = 0
+  /// Callers awaiting each setup; the last one to give up cancels it.
+  private var waiters: [Int: Int] = [:]
+  /// The last setup failure: for `retryCooldown` after it, calls fail fast with its message
+  /// instead of waiting on a hung server or downloading 81 MB again.
+  private var lastFailure: (date: Date, message: String)?
+  /// After a failed setup, how long calls fail fast (unless `retryingModel`).
+  var retryCooldown: TimeInterval = 120
+  /// Setups started (tests).
+  private(set) var setupAttempts = 0
+
+  func setRetryCooldown(_ seconds: TimeInterval) { retryCooldown = seconds }
 
   /// - Parameter modelsDirectory: the app passes App Support/DJTools/models/beat-this.
   public init(modelsDirectory: URL) {
@@ -54,19 +65,22 @@ public actor MusicalAnalyzer {
 
   /// Decodes `url` (anything AVAudioFile reads: MP3, M4A, FLAC, WAV, AIFF) once, then detects the
   /// key and the tempo concurrently. The first call downloads the tempo model (81 MB) when it's
-  /// missing and checks it; failing that throws `.modelUnavailable`. Safe to call concurrently;
-  /// cancel by cancelling the calling Task (also while the model downloads).
+  /// missing and checks it; failing that throws `.modelUnavailable`, and so does every call for
+  /// two minutes after, straight away. Safe to call concurrently; cancel by cancelling the calling
+  /// Task (also while the model downloads).
   ///
   /// - Parameters:
+  ///   - retryingModel: try the setup again even within two minutes of a failure (Try Again).
   ///   - progress: 0…1 (decode, then the network's chunks).
   ///   - status: "Downloading model…" or "Verifying model…" while the model is set up, then
   ///     "Analyzing…".
   public nonisolated func analyze(
     _ url: URL,
+    retryingModel: Bool = false,
     progress: (@Sendable (Double) -> Void)? = nil,
     status: (@Sendable (String) -> Void)? = nil
   ) async throws -> MusicalAnalysis {
-    try await prepare(status: status)
+    try await prepare(retrying: retryingModel, status: status)
     try Task.checkCancellation()
     status?("Analyzing…")
     progress?(0)
@@ -93,15 +107,21 @@ public actor MusicalAnalyzer {
     preparing?.cancel()
     preparing = nil
     prepared = false
+    lastFailure = nil
     try await tracker.removeWeights()
   }
 
-  private func prepare(status: (@Sendable (String) -> Void)?) async throws {
+  private func prepare(retrying: Bool, status: (@Sendable (String) -> Void)?) async throws {
     let tracker = self.tracker
     let onDisk = await tracker.isPrepared
     // Set up once; again when an earlier setup failed, or the weights went missing since.
     if preparing == nil || (prepared && !onDisk) {
+      if !retrying, let failure = lastFailure, Date().timeIntervalSince(failure.date) < retryCooldown {
+        throw MusicalAnalyzerError.modelUnavailable(failure.message)
+      }
       prepared = false
+      generation += 1
+      setupAttempts += 1
       preparing = Task {
         try await tracker.prepare { line in
           if line.hasPrefix("Downloading") { status?("Downloading model…") }
@@ -112,24 +132,36 @@ public actor MusicalAnalyzer {
       status?("Downloading model…")
     }
     guard let task = preparing else { return }
-    waiters += 1
+    let mine = generation
+    waiters[mine, default: 0] += 1
+    func leave() -> Int {
+      let left = (waiters[mine] ?? 1) - 1
+      waiters[mine] = left > 0 ? left : nil
+      return left
+    }
     do {
       try await Self.value(of: task)
-      waiters -= 1
-      if preparing == task { prepared = true }
+      _ = leave()
+      if preparing == task {
+        prepared = true
+        lastFailure = nil
+      }
     } catch is CancellationError {
-      waiters -= 1
       // The shared setup keeps going for the others; the last caller to leave stops it.
-      if waiters == 0, preparing == task, !prepared {
+      if leave() == 0, preparing == task, !prepared {
         task.cancel()
         preparing = nil
       }
       throw CancellationError()
     } catch {
-      waiters -= 1
-      // A failed setup is tried again on the next call.
-      if preparing == task { preparing = nil }
-      throw MusicalAnalyzerError.modelUnavailable(error.localizedDescription)
+      _ = leave()
+      // A failed setup is tried again on the next call after the cooldown.
+      let message = error.localizedDescription
+      if preparing == task {
+        preparing = nil
+        lastFailure = (Date(), message)
+      }
+      throw MusicalAnalyzerError.modelUnavailable(message)
     }
   }
 

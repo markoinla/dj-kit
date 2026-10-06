@@ -177,7 +177,7 @@ enum SelfTest {
             do {
                 let start = clock.now
                 let analysis = try await engines.analyzer.analyze(
-                    input,
+                    input, retryingModel: false,
                     progress: { progress.record($0, every: 0.25) { log("analyze \(Int($0 * 100))%") } },
                     status: { status.record($0, every: 0) { log("analyze status: \($0)") } }
                 )

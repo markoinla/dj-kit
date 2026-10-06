@@ -268,12 +268,15 @@ public enum MusicalAnalyzerError: Error, LocalizedError {
 public actor MusicalAnalyzer {
   public init(modelsDirectory: URL)
   public var isPrepared: Bool { get async }
-  public nonisolated func analyze(_ url: URL, progress: (@Sendable (Double) -> Void)? = nil,
+  public nonisolated func analyze(_ url: URL, retryingModel: Bool = false,
+                                  progress: (@Sendable (Double) -> Void)? = nil,
                                   status: (@Sendable (String) -> Void)? = nil) async throws -> MusicalAnalysis
       // one streaming AVAudioFile decode to 22050 Hz mono (no full-rate copy; the tracker skips its
       // resample, libkeyfinder gives the same keys); key (CPU) and tempo (GPU) concurrently from it;
       // prepares the model on first use, and again if the weights went missing (one shared download
-      // for concurrent calls; a cancelled caller returns at once, the last one cancels it).
+      // for concurrent calls; a cancelled caller returns at once, the last one cancels it). After a
+      // failed setup, calls throw .modelUnavailable at once for 2 minutes unless retryingModel (Try
+      // Again). The download gives up after 15 s without data.
       // status: "Downloading model…" / "Verifying model…" while preparing, then "Analyzing…".
   public func removeWeights() async throws
 }
@@ -290,7 +293,8 @@ Runs on add (and lazily when an unanalyzed track is shown) as `Job.Kind.analyze`
 result is `Track.analysis` (raw), with the file's own BPM/key/genre tags at that time in
 `Track.fileTags`; never re-run once there. A file error is kept (`Track.analysisError`, Try Again);
 a model that couldn't be set up only fails that job (and drops the queued ones), retried on the
-next trigger (showing the track, Process, Apply, Try Again, relaunch), never by itself. Readout in the Analyze row: `124 BPM · 8A · Am`, `~96 BPM`
+next trigger (showing the track, Process, Apply, Try Again, relaunch), never by itself; within two
+minutes of a failure only Try Again actually retries, the rest fail fast. Readout in the Analyze row: `124 BPM · 8A · Am`, `~96 BPM`
 when the tempo isn't steady, a dim `tag: 123 · 9A · Em` when the file's own tags disagree (±0.5 BPM
 against the folded detection / a different key). BPM is folded with `BPMRange.forGenres` at display/save
 time: slow when either the file's own genre tag (as first read, kept through Apply) or Track ID's
