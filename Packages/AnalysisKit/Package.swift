@@ -14,7 +14,9 @@ let package = Package(
   ],
   dependencies: [
     // Same pin as ApolloMLX / StemsKit so the app links one mlx-swift.
-    .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.32.3"))
+    .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.32.3")),
+    // analysis-eval only: folder mode reads the files' own BPM / key / genre tags.
+    .package(path: "../AudioExport"),
   ],
   targets: [
     .target(
@@ -23,7 +25,9 @@ let package = Package(
     .target(
       name: "AnalysisKit",
       dependencies: ["CKeyFinder", .product(name: "MLX", package: "mlx-swift")]),
-    .executableTarget(name: "analysis-eval", dependencies: ["AnalysisKit"]),
+    .executableTarget(
+      name: "analysis-eval",
+      dependencies: ["AnalysisKit", .product(name: "AudioExport", package: "AudioExport")]),
     .testTarget(name: "AnalysisKitTests", dependencies: ["AnalysisKit"]),
   ],
   swiftLanguageModes: [.v6],
