@@ -22,7 +22,7 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     var identifiedAt: Date?
     var identityStatus: IdentityStatus?
     var identifyError: String?
-    /// BPM and key, raw (folded for display and tags by `bpmGenre`).
+    /// BPM and key, raw (folded for display and tags by `bpmGenres`).
     var analysis: DJMusicalAnalysis?
     var analysisError: String?
     /// The file's own BPM, key and genre tags when it was analyzed.
@@ -86,16 +86,14 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
 }
 
 extension Track {
-    /// What BPM is folded for: the genre the written tags will carry, so
-    /// the readout matches them: Track ID's (unless turned down), else the
-    /// file's own genre tag.
-    var bpmGenre: String? {
-        if identityStatus != .dismissed, let genre = identity?.genre?.trimmed, !genre.isEmpty { return genre }
-        return fileTags?.genre
+    /// What BPM is folded for: the file's own genre tag and Track ID's
+    /// (unless turned down); slow when either is (`BPMRange.forGenres`).
+    var bpmGenres: [String?] {
+        [fileTags?.genre, identityStatus == .dismissed ? nil : identity?.genre]
     }
 
     /// The detected BPM, folded; nil before analysis or when no beats were found.
-    var detectedBPM: Double? { analysis?.tempo?.bpm(genre: bpmGenre) }
+    var detectedBPM: Double? { analysis?.tempo?.bpm(genres: bpmGenres) }
 
     /// "124 BPM · 8A · Am" ("~96 BPM" when the tempo isn't steady); what
     /// was found, nil when nothing was.
@@ -132,6 +130,8 @@ extension Track {
 struct FileMusicalTags: Codable, Sendable, Equatable {
     var bpm: String?
     var key: String?
+    /// As first read: Apply may replace the file's genre with Track ID's,
+    /// but folding still counts the original (`AppModel.applyIdentity`).
     var genre: String?
 
     init(_ tags: AudioTags) {

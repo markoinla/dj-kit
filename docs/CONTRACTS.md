@@ -241,6 +241,7 @@ public enum BPMRange {
       // standard when it names a club style (house, techno, …step, garage, bass, trance, break(s),
       // dnb, jungle, electro — "Electronic(a)" isn't one); else slow for downtempo, trip-hop,
       // chill(out), lounge, reggae, dub, ambient; else standard
+  public static func forGenres(_ genres: [String?]) -> ClosedRange<Double>   // slow if any is slow
 }
 public enum BPMFormat {
   public static func string(_ bpm: Double) -> String   // "124" within ±0.05 of a whole number, else "123.5"
@@ -291,8 +292,10 @@ result is `Track.analysis` (raw), with the file's own BPM/key/genre tags at that
 a model that couldn't be set up only fails that job (and drops the queued ones), retried on the
 next trigger (showing the track, Process, Apply, Try Again, relaunch), never by itself. Readout in the Analyze row: `124 BPM · 8A · Am`, `~96 BPM`
 when the tempo isn't steady, a dim `tag: 123 · 9A · Em` when the file's own tags disagree (±0.5 BPM
-against the folded detection / a different key). BPM is folded with `BPMRange.forGenre` at display/save
-time, for the genre the written tags carry: Track ID's (unless turned down), else the file's. Writing: Process outputs (finished track + stems)
+against the folded detection / a different key). BPM is folded with `BPMRange.forGenres` at display/save
+time: slow when either the file's own genre tag (as first read, kept through Apply) or Track ID's
+genre (unless turned down) is slow, so a "Downtempo" file stays slow under a catalog's "Electronic";
+the readout, Process outputs and Apply use the same rule. Writing: Process outputs (finished track + stems)
 and the original on Apply get `AudioTags.bpm` / `AudioTags.key` only where the file has none (any
 BPM text but "0" counts); unsteady tempo is never written. A Process run waits for the track's
 analysis (starting it, ahead of the queue) before it starts; Apply starts one if needed and waits for it. A failed

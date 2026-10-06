@@ -28,6 +28,14 @@ public enum BPMRange {
   }
 }
 
+extension BPMRange {
+  /// `slow` when any of `genres` is slow (a file tagged "Downtempo" stays slow under a catalog's
+  /// coarse "Electronic"), else `standard`.
+  public static func forGenres(_ genres: [String?]) -> ClosedRange<Double> {
+    genres.contains { forGenre($0) == slow } ? slow : standard
+  }
+}
+
 public enum BPMFormat {
   /// "124" within ±0.05 of a whole number, else one decimal ("123.5").
   public static func string(_ bpm: Double) -> String {
