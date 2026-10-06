@@ -69,6 +69,8 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.music
         NSHumanReadableCopyright: ""
+        # Track ID: MusicKit catalog lookups ask for this before they run.
+        NSAppleMusicUsageDescription: DJ Tools looks up album, label, release date and artwork for identified tracks in the Apple Music catalog.
         # Manrope (Resources/Fonts) is registered at launch.
         ATSApplicationFontsPath: .
     settings:
