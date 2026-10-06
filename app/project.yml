@@ -1,0 +1,74 @@
+name: DJTools
+options:
+  bundleIdPrefix: la.marko
+  deploymentTarget:
+    macOS: "14.4"
+  createIntermediateGroups: true
+  xcodeVersion: "16.4"
+
+# The engine packages (Packages/QualityKit, Packages/StemsKit,
+# Packages/ApolloBridge) are added here by the integrator — see
+# DJTools/Engines/README.md. Until then the app runs on fake engines.
+
+schemes:
+  DJTools:
+    build:
+      targets:
+        DJTools: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "-useFakeEngines": true
+    archive:
+      config: Release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.4"
+    # Apple Silicon only (MLX).
+    ARCHS: arm64
+    EXCLUDED_ARCHS: x86_64
+    # No signing yet: ad-hoc.
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    GENERATE_INFOPLIST_FILE: NO
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  DJTools:
+    type: application
+    platform: macOS
+    sources:
+      - path: DJTools
+        excludes:
+          - "**/*.md"
+    info:
+      path: DJTools/Info.plist
+      properties:
+        CFBundleDisplayName: DJ Tools
+        CFBundleName: DJ Tools
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSApplicationCategoryType: public.app-category.music
+        NSHumanReadableCopyright: ""
+        # Manrope (Resources/Fonts) is registered at launch.
+        ATSApplicationFontsPath: .
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: la.marko.djtools
+        PRODUCT_NAME: DJTools
+        INFOPLIST_FILE: DJTools/Info.plist
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_PREVIEWS: YES
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    dependencies:
+      - sdk: AVFoundation.framework
