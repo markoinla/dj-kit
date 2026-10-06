@@ -1,7 +1,7 @@
 # Module contracts
 
-The app is a native SwiftUI macOS app plus four local Swift packages it links
-(QualityKit, StemsKit, ApolloMLX, AudioExport). The Python Apollo project and its Swift
+The app is a native SwiftUI macOS app plus five local Swift packages it links
+(QualityKit, StemsKit, ApolloMLX, AudioExport, LoudnessKit). The Python Apollo project and its Swift
 bridge stay in the repo as the reference implementation but are no longer linked. Each piece is built by a separate worker; these are the seams between them.
 Change a contract only by editing this file and saying so.
 
@@ -83,8 +83,8 @@ installer (no Homebrew, no sudo) and keeps uv's cache, Python and venv under
 
 ## app/ — the SwiftUI shell (XcodeGen, `app/project.yml`)
 
-Depends on QualityKit, StemsKit, ApolloMLX and AudioExport by local path. Drop files or folders in; each track gets
-actions Check Quality, Separate Stems, Repair (Apollo); a job queue shows progress;
+Depends on QualityKit, StemsKit, ApolloMLX, AudioExport and LoudnessKit by local path. Drop files or folders in; each track gets
+actions Check Quality, Separate Stems, Repair (Apollo), Normalize Loudness; a job queue shows progress;
 results land in the output folder with Reveal in Finder. Design follows Wax Studio
 (`~/Projects/wax-audio/apps/mac`, see its `WaxMac/DesignSystem`).
 
@@ -125,15 +125,56 @@ public struct AudioTags: Sendable, Equatable {        // title, artist, album, a
 }
 public enum AudioExporter {
   public static func export(_ source: URL, to destination: URL, format: AudioFileFormat,
-                            tags: AudioTags? = nil, removingSource: Bool = false,
+                            tags: AudioTags? = nil, gainDB: Double = 0, removingSource: Bool = false,
                             progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL
 }
 ```
 Lossless keeps the source's rate and is bit-exact (24-bit, 16-bit for 16-bit sources). MP3 is
 CBR joint stereo `-q 0`, resampled to 44.1 kHz, with a LAME/Info tag (exact length). Tags go
 into AIFF (ID3 chunk), FLAC (Vorbis comments + picture) and MP3 (ID3v2.3); WAV gets none.
-Atomic write; cancelling the task leaves nothing behind.
+Atomic write; cancelling the task leaves nothing behind. `gainDB` scales every sample on the way
+through (normalization); with a gain, lossless output is always 24-bit. No clipping protection:
+the caller keeps peaks below full scale. The source may be any file AVAudioFile decodes.
 
 The app (`ResultWriter`) runs each heavy engine into a scratch folder, exports, deletes the
 WAVs: `<out>/<track> (Stems)/<stem>.<ext>` and `<out>/<track> (Apollo).<ext>`. AIFF is the
 default for both (Rekordbox reads its tags and artwork).
+
+## Packages/LoudnessKit — loudness measurement and normalization (pure Swift: AVFoundation + Accelerate)
+
+ITU-R BS.1770-4 / EBU R128. K-weighting derived for the file's own sample rate (matches the
+published 48 kHz coefficients), 400 ms blocks with 75% overlap, absolute −70 LUFS gate and
+relative −10 LU gate; EBU Tech 3342 LRA (3 s short-term every 100 ms, −20 LU relative gate,
+95th − 10th percentile); true peak by polyphase windowed-sinc interpolation, 8× up to 48 kHz,
+4× up to 96 kHz, 2× above. Silence is `-infinity`.
+
+```swift
+public struct LoudnessReport: Sendable, Codable, Equatable {
+  public var integratedLUFS: Double, truePeakDBTP: Double, samplePeakDBFS: Double
+  public var loudnessRangeLU: Double?          // nil under 3 s or all gated out
+  public var duration: TimeInterval, sampleRate: Double, channels: Int
+  public var isSilent: Bool { get }
+}
+public enum LoudnessAnalyzer {   // full decode; ~0.4 s for a 3½-minute FLAC on an M5 Air
+  public static func measure(_ url: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws -> LoudnessReport
+}
+public struct NormalizationPlan: Sendable, Codable, Equatable {
+  public var targetLUFS, ceilingDBTP, gainDB: Double
+  public var limitedByCeiling: Bool             // the gain stopped where the true peak meets the ceiling
+  public var resultingLUFS, resultingTruePeakDBTP: Double
+}
+public enum Normalizer {
+  public static func gain(for: LoudnessReport, targetLUFS: Double, ceilingDBTP: Double) -> NormalizationPlan
+}
+public final class LoudnessMeter   // streaming core: process(planar floats) … finish()
+```
+Pure gain, never a limiter or compression: when the target would push the true peak past the
+ceiling, the gain is capped there (which is a cut when the source already peaks above it).
+`loudness <file>… [--target] [--ceiling]` prints the report and plan as JSON.
+
+The app's flow (`ResultWriter.normalize`): measure the source, plan, then `AudioExporter.export`
+the source itself with `gainDB` to `<out>/<track> (Normalized).<ext>` (Settings default AIFF;
+title suffixed " (Normalized)"). Settings' "Also normalize repaired tracks" does the same to
+Apollo's scratch WAV as the repair's last step (`<track> (Apollo).<ext>`). Stems are never
+normalized: they must keep their relative levels to sum back to the mix. Measuring is never
+part of the automatic quality check (it needs a full decode); the Normalize card measures lazily.

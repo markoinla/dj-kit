@@ -1,10 +1,10 @@
 # Engines: the seam to the packages
 
-The app talks to the packages only through three protocols in
+The app talks to the packages only through four protocols in
 `EngineProtocols.swift`, using its own copies of the contract types in
 `EngineTypes.swift` (`DJQualityReport`, `DJStemModel`, … — same fields and
 cases as `docs/CONTRACTS.md`, prefixed `DJ` so nothing clashes). Only
-`RealEngines.swift` imports QualityKit, StemsKit and ApolloMLX.
+`RealEngines.swift` imports QualityKit, StemsKit, ApolloMLX and LoudnessKit.
 
 | Protocol | Adapter (`RealEngines.swift`) | Package API |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ cases as `docs/CONTRACTS.md`, prefixed `DJ` so nothing clashes). Only
 | `StemSeparating` | `StemsKitAdapter` (actor, one `StemSeparator` per model, kept alive) | `StemSeparator(model:modelsDirectory:).separate(...)` |
 | `ApolloRepairing` | `ApolloMLXAdapter` (actor) | `ApolloMLXRepairer(modelsDirectory:)` |
 | `ApolloRepairing.reset()` | `removeWeights()` | — |
+| `LoudnessMeasuring` | `LoudnessKitAdapter` | `LoudnessAnalyzer.measure(_:progress:)`, `Normalizer.gain(for:targetLUFS:ceilingDBTP:)` |
 
 Adapters deliver every progress/status callback on the main queue, in order
 (`MainHop`).
@@ -39,16 +40,26 @@ output folder's volume; `AudioExport` converts each to the job's format
 title/artist/album/artwork (title suffixed " (Vocals)", " (Repaired)", …;
 not for WAV) and the scratch folder is deleted however the job ends. Names:
 `<out>/<track> (Stems)/<stem>.<ext>` (replacing an older folder) and
-`<out>/<track> (Apollo).<ext>` (numbered when taken). The defaults are in
-Settings (`AppSettings.stemsFormat` / `repairFormat`); the "Save as" menu
-under each tool's button overrides them per job.
+`<out>/<track> (Apollo).<ext>` and `<out>/<track> (Normalized).<ext>`
+(numbered when taken). The defaults are in Settings
+(`AppSettings.stemsFormat` / `repairFormat` / `normalizeFormat`); the "Save
+as" menu under each tool's button overrides them per job.
+
+Normalize (`ResultWriter.normalize`) needs no scratch file: LoudnessKit
+measures the source, the plan's gain is applied by `AudioExporter.export(…,
+gainDB:)` while it decodes the source and encodes the copy. With Settings'
+"Also normalize repaired tracks", `ResultWriter.repair` measures Apollo's
+WAV and saves it with the gain. Stems are never normalized.
 
 `Engines.real(supportDirectory:)` builds them; `supportDirectory` is
 `AppPaths.support` (`~/Library/Application Support/DJTools`, or
 `-supportDirectory <path>`).
 
 Heavy jobs (stems ~5.4 GB peak footprint, Apollo repairs ~2.9 GB) share one slot in
-`AppModel` (`heavyInFlight`), so they never run together.
+`AppModel` (`heavyInFlight`), so they never run together. Loudness measuring
+(`Job.Kind.loudness`, lazily for the Normalize card) and normalizing are light
+but decode the whole file: two at a time (`maxConcurrentDecodes`), beside the
+heavy slot. Quality checks never measure loudness.
 
 ## Building
 
@@ -71,13 +82,18 @@ Run `xcodegen` before every build on the Mac: `scripts/mac.sh` rsyncs with
 ```sh
 DJTools.app/Contents/MacOS/DJTools -selfTest <audio> <out dir> \
   -supportDirectory <scratch dir> [-selfTestApollo] [-selfTestSkipStems] [-useFakeEngines]
+  [-selfTestNormalize [-selfTestTarget -10] [-selfTestCeiling -1]]
   [-selfTestFormat aiff|wav|flac|mp3-320|mp3-256|mp3-192]
 ```
 
 Runs quality check, htdemucs stems and (with `-selfTestApollo`) Apollo
-install + repair through the same adapters and `ResultWriter` the window
-uses, one after the other, saved as `-selfTestFormat` (default aiff); each
-output is decoded again and its rate, length and tags checked. Prints one
+install + repair and (with `-selfTestNormalize`) Normalize Loudness through
+the same adapters and `ResultWriter` the window uses, one after the other
+(both flags: the repair is normalized too), saved as `-selfTestFormat`
+(default aiff); each output is decoded again and its rate, length and tags
+checked. A normalized output is also measured again with LoudnessKit and
+must land within ±0.2 LU of the target, or on the ceiling (±0.1 dB) when the
+plan was capped. Prints one
 JSON object (timings, outputs, callback counts and whether any arrived off
 the main thread) and exits 0/1. Works in Release, no GUI
 session needed; `-supportDirectory` keeps the models out of
@@ -91,7 +107,8 @@ the real ones run. The toolbar then shows
 "Demo engines". Quality verdicts are deterministic per file name (a name with
 "128" reads Low quality, "fake" Fake lossless). Stems and repairs count up for a
 few seconds and write one-second silent WAVs where the real ones would write
-output. The fake Apollo "install" leaves a marker in
+output. The fake loudness meter makes up a measurement per file name; the
+normalized copy still goes through the real AudioExport. The fake Apollo "install" leaves a marker in
 `App Support/DJTools/fake-engines/`, never in `models/`. `-fakeEngineSpeed 4`
 runs them four times faster.
 
