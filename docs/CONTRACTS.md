@@ -69,6 +69,9 @@ public actor ApolloRuntime {
   public func cancel() async
 }
 ```
+(Additive: `repair(input:output:progress:status:)` also passes Apollo's status lines —
+"Loading model", "Repairing on MPS" — which the app shows in the job row.)
+
 `install` downloads `uv` into `supportDirectory/runtime/bin` with the official standalone
 installer (no Homebrew, no sudo) and keeps uv's cache, Python and venv under
 `supportDirectory/runtime/`.
