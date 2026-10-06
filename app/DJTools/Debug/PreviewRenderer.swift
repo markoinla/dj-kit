@@ -25,6 +25,7 @@ enum PreviewRenderer {
         let queue = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.queueJobs, showsJobs: true)
         let installing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs,
                                         apollo: .installing("Installing PyTorch and dependencies… 42%"))
+        let repairing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.repairJobs, apollo: .ready, showsJobs: true)
 
         var shots: [(String, AnyView)] = [
             ("01-welcome", AnyView(PreviewWindow(model: empty, selection: []))),
@@ -37,6 +38,7 @@ enum PreviewRenderer {
             ("07-apollo-installing", AnyView(PreviewWindow(model: installing, selection: [fixtures.overmono.id],
                                                            sheet: AnyView(ApolloSetupContent(state: installing.apolloState, trackCount: 1))))),
             ("08-track-checking", AnyView(PreviewWindow(model: busy, selection: [fixtures.kettama.id]))),
+            ("09-track-very-low-source", AnyView(PreviewWindow(model: repairing, selection: [fixtures.burial.id]))),
         ]
         shots.append(contentsOf: [
             ("11-dark-track-low-quality", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id]))),
@@ -206,9 +208,10 @@ struct PreviewFixtures {
     let ross: Track
     let kettama: Track
     let bicep: Track
+    let burial: Track
     let settings = AppSettings(defaults: UserDefaults(suiteName: "la.marko.djtools.previews")!)
 
-    var tracks: [Track] { [floatingPoints, overmono, fred, ross, kettama, bicep] }
+    var tracks: [Track] { [floatingPoints, overmono, fred, ross, kettama, bicep, burial] }
 
     init() {
         let folder = URL.musicDirectory.appending(path: "Promos/October 2026", directoryHint: .isDirectory)
@@ -249,6 +252,8 @@ struct PreviewFixtures {
                         size: 61_000_000, summary: "")
         bicep = track("Bicep - Glue (Original Mix).mp3", .lowQuality, bitrate: 160, cutoff: 16_500, duration: 269,
                       size: 5_400_000, summary: "Cuts off at 16.5 kHz — likely a 160 kbps MP3")
+        burial = track("Burial - Archangel (old rip).mp3", .lowQuality, bitrate: 64, cutoff: 11_000, duration: 238,
+                       size: 1_900_000, summary: "MP3 64 kbps, cuts off at 11.0 kHz — low quality")
     }
 
     private func job(_ track: Track, _ kind: Job.Kind, _ state: Job.State, progress: Double? = nil, result: URL? = nil) -> Job {
@@ -264,6 +269,14 @@ struct PreviewFixtures {
         [job(kettama, .quality, .running),
          job(bicep, .stems(.htdemucs), .running, progress: 0.42),
          job(fred, .repair, .queued)]
+    }
+
+    /// An Apollo repair running (with Apollo's own status line), stems waiting
+    /// behind it: heavy jobs never overlap.
+    var repairJobs: [Job] {
+        var repair = job(burial, .repair, .running, progress: 0.31)
+        repair.statusText = "Repairing on MPS"
+        return [repair, job(bicep, .stems(.htdemucs), .queued)]
     }
 
     /// Everything the queue panel can show.

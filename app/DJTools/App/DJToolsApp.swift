@@ -18,7 +18,10 @@ enum DJToolsMain {
         #endif
         if SelfTest.requested() {
             SelfTest.start()
-            dispatchMain()
+            // A run loop on the real main thread, not dispatchMain(): that
+            // parks the main thread and drains the main queue on a worker,
+            // so "delivered on the main thread" couldn't be checked.
+            while true { RunLoop.main.run() }
         }
         DJToolsApp.main()
     }
