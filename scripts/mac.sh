@@ -16,7 +16,7 @@ fi
 ssh -o BatchMode=yes "$host" "mkdir -p ~/$dir"
 rsync -az --delete \
   --exclude .git --exclude .dd --exclude .build --exclude .venv --exclude '*.xcodeproj' \
-  --exclude .cache --exclude .uv --exclude 'out/' --exclude .swiftpm \
+  --exclude .cache --exclude .uv --exclude 'out/' --exclude .swiftpm --exclude testdata \
   "$root/" "$host:$dir/"
 cmd="${*:-true}"
 ssh -o BatchMode=yes "$host" "bash -lc $(printf '%q' "cd ~/$dir && $cmd")"
