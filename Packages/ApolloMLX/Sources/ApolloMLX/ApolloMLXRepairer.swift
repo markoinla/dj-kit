@@ -1,4 +1,17 @@
 // Public entry point: weights preparation and full-track repair.
+//
+// Verified 2026-10-05 on a MacBook Air M5 (16 GB), against apollo/ (PyTorch):
+// - Parity (`apollo-mlx parity`, fixtures from tools/make_reference.py): on white noise, fp32
+//   matches torch fp32 to max abs 9e-7 (119 dB SNR). On a 7 s chunk of a 64 kbps mp3, 62.8 dB
+//   vs torch fp32 and 70.1 dB vs torch fp64, while torch fp32 itself is only 59.8 dB from fp64:
+//   Apollo divides each band by its energy, so near-silent bands above a codec cutoff amplify
+//   rounding, and no fp32 implementation gets closer. fp16 52 dB, bf16 43 dB vs torch fp32.
+// - Full track, same decoded input: 71.6 dB vs Python CPU fp32. From the mp3 itself the
+//   outputs differ more (27-30 dB) because AVFoundation and FFmpeg decode/resample slightly
+//   differently (64 dB apart) and the model amplifies that too; neither is "the" right one.
+// - Speed on a 240 s track: fp16 82 s wall (RTF 0.33, 2.7 GiB peak footprint), fp32 167 s
+//   (RTF 0.69, 4.4 GiB); Python MPS on the same box: fp16 131 s / 4.4 GiB, fp32 182 s / 7.0 GiB.
+// fp16 is the default: same quality metrics vs the lossless original as fp32, twice as fast.
 import CryptoKit
 import Foundation
 import MLX
@@ -73,7 +86,11 @@ public actor ApolloMLXRepairer {
 
   /// Ensures converted weights exist: downloads the pinned upstream `pytorch_model.bin`
   /// (66 MB) from Hugging Face, verifies its SHA-256, converts it to MLX safetensors in Swift
-  /// and deletes the original. No Python involved.
+  /// (TorchCheckpoint + WeightConversion) and deletes the original. No Python involved.
+  /// The result is `<modelsDirectory>/apollo-mlx.safetensors` (66 MB, fp32); its tensors are
+  /// bit-identical to tools/convert_weights.py's output. About 10 s on a fast connection;
+  /// a no-op once the file exists. With an explicit `weightsURL` nothing is downloaded and a
+  /// missing file is an error. Cancel by cancelling the calling Task.
   public func prepare(progress: @escaping @Sendable (String) -> Void) async throws {
     if isPrepared { progress("Weights ready"); return }
     if let explicitWeights { throw ApolloMLXError.badWeights("Weights not found at \(explicitWeights.path)") }
@@ -101,6 +118,20 @@ public actor ApolloMLXRepairer {
     try WeightConversion.convertCheckpoint(checkpoint, to: weightsURL)
     try? fm.removeItem(at: checkpoint)
     progress("Weights ready")
+  }
+
+  /// Deletes the converted weights (and any half-finished download) so the next prepare()
+  /// fetches them again. Never touches an explicit `weightsURL`.
+  public func removeWeights() throws {
+    model = nil
+    fallbackModel = nil
+    weights = nil
+    guard explicitWeights == nil else { return }
+    let fm = FileManager.default
+    for name in [Self.weightsFileName, "pytorch_model.bin"] {
+      let url = modelsDirectory.appendingPathComponent(name)
+      if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
+    }
   }
 
   static func sha256(_ url: URL) throws -> String {
