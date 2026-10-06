@@ -1,0 +1,33 @@
+[project]
+name = "apollo-repair"
+version = "0.1.0"
+description = "Apollo (JusperLee/Apollo) lossy-audio repair, wrapped as a JSON-lines CLI for DJ Tools"
+license = "CC-BY-SA-4.0"
+license-files = ["LICENSE", "NOTICE.md"]
+requires-python = "==3.12.*"
+dependencies = [
+  # 2.11.0 is the release upstream validated Apollo on MPS with.
+  "torch==2.11.0",
+  "numpy>=2.0,<3",
+  "soundfile>=0.13,<1",
+  # Bundles its own FFmpeg, so mp3/m4a/aac/aiff decode needs no system ffmpeg.
+  "av>=14,<20",
+  "huggingface-hub>=1.0,<3",
+  # The released checkpoint pickles omegaconf config objects next to the state dict.
+  "omegaconf>=2.3,<3",
+]
+
+[project.scripts]
+apollo-repair = "apollo_repair.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv]
+# The app only ships for Apple Silicon; keeps the lock (and resolution) to one platform.
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
+required-environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
