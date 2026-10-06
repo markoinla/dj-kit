@@ -103,6 +103,7 @@ struct SettingsView: View {
         case .analysis:
             Section {
                 Toggle("Detect BPM and key", isOn: $settings.detectBPMKey)
+                    .onChange(of: settings.detectBPMKey) { _, on in if !on { model.dropQueuedAnalyses() } }
                 Picker("Key tag", selection: $settings.keyTag) {
                     ForEach(KeyTagStyle.allCases, id: \.self) { Text($0.title).tag($0) }
                 }

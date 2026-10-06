@@ -150,28 +150,26 @@ namespace KeyFinder {
     0.49072435317960994006,
   };
 
-  static std::vector<double> tpMajor;
-  static std::vector<double> tpMinor;
-
-  const std::vector<double>& toneProfileMajor() {
-    if (tpMajor.size() == 0) {
-      for (unsigned int o = 0; o < OCTAVES; o++) {
-        for (unsigned int s = 0; s < SEMITONES; s++) {
-          tpMajor.push_back(OCTAVE_WEIGHTS[o] * MAJOR_PROFILE[s]);
-        }
+  // dj-tools: built once in a function-local static (thread-safe initialisation). The original
+  // filled file-level vectors on first use without a lock, so two first calls at once could race
+  // (and push the profile twice).
+  static std::vector<double> profile(const double *semitones) {
+    std::vector<double> tp;
+    for (unsigned int o = 0; o < OCTAVES; o++) {
+      for (unsigned int s = 0; s < SEMITONES; s++) {
+        tp.push_back(OCTAVE_WEIGHTS[o] * semitones[s]);
       }
     }
+    return tp;
+  }
+
+  const std::vector<double>& toneProfileMajor() {
+    static const std::vector<double> tpMajor = profile(MAJOR_PROFILE);
     return tpMajor;
   }
 
   const std::vector<double>& toneProfileMinor() {
-    if (tpMinor.size() == 0) {
-      for (unsigned int o = 0; o < OCTAVES; o++) {
-        for (unsigned int s = 0; s < SEMITONES; s++) {
-          tpMinor.push_back(OCTAVE_WEIGHTS[o] * MINOR_PROFILE[s]);
-        }
-      }
-    }
+    static const std::vector<double> tpMinor = profile(MINOR_PROFILE);
     return tpMinor;
   }
 

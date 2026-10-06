@@ -15,7 +15,8 @@ constexpr size_t kChunkFrames = 1 << 21;
 constexpr double kSilenceMeanSquare = 1e-10;
 
 KeyFinder::KeyFinder &sharedFinder() {
-  // Its filter / kernel / window caches are mutex-guarded, so one instance serves all threads.
+  // One instance serves all threads: its filter / chroma-transform / window caches lock around
+  // the whole lookup (dj-tools patch, see VENDORED.md; upstream scanned them unlocked).
   static KeyFinder::KeyFinder finder;
   return finder;
 }

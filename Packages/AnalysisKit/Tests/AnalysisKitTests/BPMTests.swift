@@ -57,6 +57,10 @@ struct BPMTests {
     #expect(BPMRange.forGenres([nil, "Reggae"]) == BPMRange.slow)
     #expect(BPMRange.forGenres(["House", "Electronic"]) == BPMRange.standard)
     #expect(BPMRange.forGenres(["Chill House", "Dance"]) == BPMRange.standard)
+    // A club style in either wins over a slow word in the other.
+    #expect(BPMRange.forGenres(["Lounge", "House"]) == BPMRange.standard)
+    #expect(BPMRange.forGenres(["Techno", "Ambient"]) == BPMRange.standard)
+    #expect(BPMRange.forGenres(["Downtempo", nil]) == BPMRange.slow)
     #expect(BPMRange.forGenres([nil, nil]) == BPMRange.standard)
     #expect(BPMRange.forGenres([]) == BPMRange.standard)
   }

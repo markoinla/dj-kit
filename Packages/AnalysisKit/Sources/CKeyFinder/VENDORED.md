@@ -18,6 +18,14 @@ General Public License, version 3 or later (see `LICENSE`). https://github.com/m
     checked against the original loop); 6 min at 44.1 kHz goes from ~0.5 s to ~0.37 s.
   - `keyclassifier.{h,cpp}`: `classify` takes an optional `outScores` vector for the
     24 cosine scores, so the shim can report a confidence margin.
+  - `lowpassfilterfactory.cpp`, `chromatransformfactory.cpp`, `temporalwindowfactory.cpp`:
+    each `get*` holds the factory's mutex for the whole lookup (`std::lock_guard`), not just
+    the insert. Upstream scanned the vector unlocked while another thread could `push_back`
+    (reallocation: use-after-free) and read freshly built filters without a happens-before.
+  - `constants.cpp`: `toneProfileMajor/Minor` build their vectors in a function-local static
+    (thread-safe initialisation) instead of filling globals on first use unlocked.
+  - Both found with ThreadSanitizer: 8 threads calling `ckf_detect` at once (same rate and
+    different rates); clean after the patches.
 - Added: `CKeyFinder.cpp` + `include/CKeyFinder.h`, the plain C shim AnalysisKit calls.
 
 To update, replace `libkeyfinder/` from a new release and re-apply the patches above.

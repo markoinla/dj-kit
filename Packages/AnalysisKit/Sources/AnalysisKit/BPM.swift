@@ -12,27 +12,34 @@ public enum BPMRange {
   /// ("Organic House / Downtempo", "Chill House", "Ambient Techno", "Chillstep", "Dub Techno").
   /// Case-, space- and punctuation-insensitive ("Trip Hop", "trip-hop", "Chill-Out").
   public static func forGenre(_ genre: String?) -> ClosedRange<Double> {
-    guard let genre, !genre.isEmpty else { return standard }
+    forGenres([genre])
+  }
+
+  /// One range for several genres (the file's tag and Track ID's): `standard` when any names a
+  /// club style ("Lounge" + "House"), else `slow` when any is slow ("Downtempo" under a catalog's
+  /// coarse "Electronic"), else `standard`.
+  public static func forGenres(_ genres: [String?]) -> ClosedRange<Double> {
+    let kinds = genres.map(kind)
+    if kinds.contains(.club) { return standard }
+    return kinds.contains(.slow) ? slow : standard
+  }
+
+  private enum Kind { case club, slow, other }
+
+  private static func kind(_ genre: String?) -> Kind {
+    guard let genre, !genre.isEmpty else { return .other }
     let lower = genre.lowercased()
     let compact = String(lower.unicodeScalars.filter { CharacterSet.letters.contains($0) })
     let club = ["house", "techno", "step", "garage", "bass", "trance", "break", "dnb", "jungle", "electro"]
     // "Electronic(a)" is no style.
     let styles = compact.replacingOccurrences(of: "electronic", with: "")
-    if club.contains(where: styles.contains) { return standard }
+    if club.contains(where: styles.contains) { return .club }
     if ["downtempo", "triphop", "chill", "lounge", "reggae", "ambient"].contains(where: compact.contains) {
-      return slow
+      return .slow
     }
     let words = lower.split(whereSeparator: { !$0.isLetter }).map(String.init)
-    if words.contains("dub") || words.contains("dubwise") { return slow }
-    return standard
-  }
-}
-
-extension BPMRange {
-  /// `slow` when any of `genres` is slow (a file tagged "Downtempo" stays slow under a catalog's
-  /// coarse "Electronic"), else `standard`.
-  public static func forGenres(_ genres: [String?]) -> ClosedRange<Double> {
-    genres.contains { forGenre($0) == slow } ? slow : standard
+    if words.contains("dub") || words.contains("dubwise") { return .slow }
+    return .other
   }
 }
 
