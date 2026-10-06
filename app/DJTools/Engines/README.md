@@ -17,7 +17,7 @@ and views use too.
 | `ApolloRepairing` | `ApolloMLXAdapter` (actor) | `ApolloMLXRepairer(modelsDirectory:)` |
 | `ApolloRepairing.reset()` | `removeWeights()` | — |
 | `LoudnessMeasuring` | `LoudnessKitAdapter` | `LoudnessAnalyzer.measure(_:progress:)`, `Normalizer.gain(for:targetLUFS:ceilingDBTP:)` |
-| `MusicalAnalyzing` | `AnalysisKitAdapter` | `MusicalAnalyzer(modelsDirectory:).analyze(_:progress:status:)`, `removeWeights()` |
+| `MusicalAnalyzing` | `AnalysisKitAdapter` | `MusicalAnalyzer(modelsDirectory:).analyze(_:retryingModel:progress:status:)`, `removeWeights()` |
 
 Adapters deliver every progress/status callback on the main queue, in order
 (`MainHop`).

@@ -241,7 +241,8 @@ public enum BPMRange {
       // standard when it names a club style (house, techno, …step, garage, bass, trance, break(s),
       // dnb, jungle, electro — "Electronic(a)" isn't one); else slow for downtempo, trip-hop,
       // chill(out), lounge, reggae, dub, ambient; else standard
-  public static func forGenres(_ genres: [String?]) -> ClosedRange<Double>   // slow if any is slow
+  public static func forGenres(_ genres: [String?]) -> ClosedRange<Double>
+      // standard if any names a club style, else slow if any is slow, else standard
 }
 public enum BPMFormat {
   public static func string(_ bpm: Double) -> String   // "124" within ±0.05 of a whole number, else "123.5"
@@ -297,12 +298,14 @@ next trigger (showing the track, Process, Apply, Try Again, relaunch), never by 
 minutes of a failure only Try Again actually retries, the rest fail fast. Readout in the Analyze row: `124 BPM · 8A · Am`, `~96 BPM`
 when the tempo isn't steady, a dim `tag: 123 · 9A · Em` when the file's own tags disagree (±0.5 BPM
 against the folded detection / a different key). BPM is folded with `BPMRange.forGenres` at display/save
-time: slow when either the file's own genre tag (as first read, kept through Apply) or Track ID's
-genre (unless turned down) is slow, so a "Downtempo" file stays slow under a catalog's "Electronic";
+time over the file's own genre tag (as first read, kept through Apply) and Track ID's genre (unless
+turned down): standard when either names a club style ("Lounge" + "House"), else slow when either
+is slow, so a "Downtempo" file stays slow under a catalog's "Electronic";
 the readout, Process outputs and Apply use the same rule. Writing: Process outputs (finished track + stems)
 and the original on Apply get `AudioTags.bpm` / `AudioTags.key` only where the file has none (any
-BPM text but "0" counts); unsteady tempo is never written. A Process run waits for the track's
-analysis (starting it, ahead of the queue) before it starts; Apply starts one if needed and waits for it. A failed
+BPM text but "0" counts); unsteady tempo is never written; nothing is written with the setting off. A Process run first waits, in one loop,
+until the track has no quality check, Track ID or analysis active (a queued analysis starts ahead of
+the queue) and isn't being applied, then re-reads its path; Apply starts one if needed and waits for it. A failed
 analysis saves without and shows its error.
 
 AudioExport additions: `AudioTags.bpm: String?`, `AudioTags.key: String?` — ID3 TBPM/TKEY (AIFF,

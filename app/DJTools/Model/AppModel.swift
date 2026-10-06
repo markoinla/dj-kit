@@ -59,6 +59,9 @@ final class AppModel {
     @ObservationIgnored private var heavyInFlight: Job.ID?
     /// Try Again: these tracks' next analysis retries a model setup that just failed.
     @ObservationIgnored private var retryModel: Set<Track.ID> = []
+    /// Tracks whose BPM / key couldn't run because the tempo model couldn't
+    /// be set up (offline), with the message. Not saved; cleared on the next try.
+    private(set) var analysisUnavailable: [Track.ID: String] = [:]
     /// Process runs waiting for Apollo's setup to finish.
     @ObservationIgnored private var pendingProcess: [(id: Track.ID, recipe: ProcessRecipe, target: DJLoudnessTarget)] = []
 
@@ -198,8 +201,10 @@ final class AppModel {
                 guard let track = track(id), let identity = track.identity else { continue }
                 do {
                     let existing = await AudioTags.read(from: track.url)
-                    let tags = TrackTags.fillingAnalysis(
-                        await TrackTags.tags(for: identity), from: track, keyTag: settings.keyTag, existing: existing)
+                    var tags = await TrackTags.tags(for: identity)
+                    if settings.detectBPMKey {
+                        tags = TrackTags.fillingAnalysis(tags, from: track, keyTag: settings.keyTag, existing: existing)
+                    }
                     var destination: URL?
                     if rename {
                         let name = TrackTags.fileName(TrackTags.displayName(tags, fallback: track.name))
@@ -293,10 +298,14 @@ final class AppModel {
     /// failed setup.
     func analyze(_ ids: [Track.ID]) {
         for id in ids where !applying.contains(id) {
-            retryModel.insert(id)
             updateTrack(id) { $0.analysisError = nil }
-            enqueue(.analyze, for: id)
+            if enqueue(.analyze, for: id) { retryModel.insert(id) }
         }
+    }
+
+    /// The setting was turned off: queued detections don't run.
+    func dropQueuedAnalyses() {
+        jobs.removeAll { $0.kind == .analyze && $0.state == .queued }
     }
 
     // MARK: - Jobs
@@ -362,14 +371,18 @@ final class AppModel {
         jobs.removeAll { $0.id == id && !$0.state.isActive }
     }
 
-    private func enqueue(_ kind: Job.Kind, for trackID: Track.ID, format: AudioFileFormat? = nil) {
-        guard let track = track(trackID) else { return }
+    /// False when the track is gone or already has this tool queued or running.
+    @discardableResult
+    private func enqueue(_ kind: Job.Kind, for trackID: Track.ID, format: AudioFileFormat? = nil) -> Bool {
+        guard let track = track(trackID) else { return false }
         // Once per tool per track at a time.
-        if jobs.contains(where: { $0.trackID == trackID && $0.kind.sameTool(as: kind) && $0.state.isActive }) { return }
+        if jobs.contains(where: { $0.trackID == trackID && $0.kind.sameTool(as: kind) && $0.state.isActive }) { return false }
         // Drop older finished runs of the same tool for this track.
         jobs.removeAll { $0.trackID == trackID && $0.kind.sameTool(as: kind) && !$0.state.isActive }
         jobs.append(Job(trackID: trackID, trackName: track.name, kind: kind, format: format))
+        if kind == .analyze { analysisUnavailable[trackID] = nil }
         pump()
+        return true
     }
 
     /// Starts what can start: checks and decodes up to their limits, one heavy job.
@@ -508,12 +521,12 @@ final class AppModel {
                 finish(job.id, .finished)
 
             case .process(let recipe, let target):
-                // The name and the repair suggestion come from Track ID and
-                // the quality check: let this track's finish first.
-                try await waitForChecks(track.id)
-                // BPM and key go into the tags where the file has none.
+                // The name, the repair suggestion and BPM / key come from the
+                // quality check, Track ID and the analysis: let this track's
+                // finish (and an Apply, which can rename the file) first.
                 analyzeIfNeeded([track.id])
-                try await waitForAnalysis(track.id)
+                try await waitForTrack(track.id)
+                // Read again: an Apply may have moved the file.
                 guard let current = self.track(track.id), isRunning(job.id) else { return }
                 let steps = ResultWriter.Steps(
                     repair: recipe.repairs(current),
@@ -547,6 +560,10 @@ final class AppModel {
             if job.kind == .analyze {
                 if error is DJAnalysisModelUnavailable {
                     // Not the file's fault: the others queued now would fail the same way.
+                    analysisUnavailable[track.id] = message
+                    for queued in jobs where queued.kind == .analyze && queued.state == .queued {
+                        analysisUnavailable[queued.trackID] = message
+                    }
                     jobs.removeAll { $0.kind == .analyze && $0.state == .queued }
                 } else {
                     updateTrack(track.id) { $0.analysisError = message }
@@ -556,11 +573,17 @@ final class AppModel {
         }
     }
 
-    /// Waits while this track's quality check or Track ID is queued or
-    /// running, or its match is being written (that can rename the file).
-    private func waitForChecks(_ id: Track.ID) async throws {
-        while applying.contains(id)
-            || jobs.contains(where: { $0.trackID == id && ($0.kind == .quality || $0.kind == .identify) && $0.state.isActive }) {
+    /// Waits, in one loop, while this track's quality check, Track ID or
+    /// analysis is queued or running (a queued analysis starts straight away,
+    /// ahead of the line) or its match is being written (that can rename the
+    /// file). One loop, so an Apply can't start between two waits.
+    private func waitForTrack(_ id: Track.ID) async throws {
+        while true {
+            if let job = job(for: id, kind: .analyze), job.state == .queued { start(job.id) }
+            let busy = jobs.contains {
+                $0.trackID == id && ($0.kind == .quality || $0.kind == .identify || $0.kind == .analyze) && $0.state.isActive
+            }
+            if !busy && !applying.contains(id) { return }
             try await Task.sleep(for: .milliseconds(250))
         }
     }
@@ -575,9 +598,10 @@ final class AppModel {
     }
 
     /// A Process run's tags: the file's and the match (`TrackTags.forResults`),
-    /// plus the detected BPM and key where the file has none.
+    /// plus the detected BPM and key where the file has none (setting on).
     private func resultTags(_ track: Track) async -> AudioTags {
         let tags = await TrackTags.forResults(track)
+        guard settings.detectBPMKey else { return tags }
         return TrackTags.fillingAnalysis(tags, from: track, keyTag: settings.keyTag, existing: tags)
     }
 

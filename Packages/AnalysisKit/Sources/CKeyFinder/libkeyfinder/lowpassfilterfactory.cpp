@@ -64,6 +64,9 @@ namespace KeyFinder {
   }
 
   const LowPassFilter* LowPassFilterFactory::getLowPassFilter(unsigned int inOrder, unsigned int inFrameRate, double inCornerFrequency, unsigned int inFftFrameSize) {
+    // dj-tools: the lock covers the lookup too (another thread's push_back can reallocate the
+    // vector mid-scan, and an unlocked read of a just-built filter has no happens-before).
+    std::lock_guard<std::mutex> guard(lowPassFilterFactoryMutex);
     for (unsigned int i = 0; i < lowPassFilters.size(); i++) {
       LowPassFilterWrapper* wrapper = lowPassFilters[i];
       if (wrapper->getOrder() == inOrder &&
@@ -73,11 +76,9 @@ namespace KeyFinder {
         return wrapper->getLowPassFilter();
       }
     }
-    lowPassFilterFactoryMutex.lock();
     LowPassFilter *lpf = new LowPassFilter(inOrder, inFrameRate, inCornerFrequency, inFftFrameSize);
     lowPassFilters.push_back(new LowPassFilterWrapper(inOrder, inFrameRate, inCornerFrequency, inFftFrameSize, lpf));
     unsigned int newLowPassFilterIndex = lowPassFilters.size()-1;
-    lowPassFilterFactoryMutex.unlock();
     return lowPassFilters[newLowPassFilterIndex]->getLowPassFilter();
   }
 

@@ -84,6 +84,7 @@ public actor BeatTracker {
     if verified && isPrepared { return }
     let fm = FileManager.default
     try fm.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+    removePartials()
     if !isPrepared {
       progress("Downloading the tempo model (81 MB)")
       let (tmp, response) = try await Self.session.download(from: Self.weightsURL)
@@ -100,8 +101,11 @@ public actor BeatTracker {
       let partial = modelsDirectory.appendingPathComponent(".partial-\(UUID().uuidString)")
       try fm.moveItem(at: tmp, to: partial)
       do {
-        _ = try? fm.removeItem(at: weightsFile)
-        try fm.moveItem(at: partial, to: weightsFile)
+        if fm.fileExists(atPath: weightsFile.path) {
+          _ = try fm.replaceItemAt(weightsFile, withItemAt: partial)
+        } else {
+          try fm.moveItem(at: partial, to: weightsFile)
+        }
       } catch {
         try? fm.removeItem(at: partial)
         throw error
@@ -123,12 +127,17 @@ public actor BeatTracker {
   public func removeWeights() throws {
     model = nil
     verified = false
+    removePartials()
+    if FileManager.default.fileExists(atPath: weightsFile.path) {
+      try FileManager.default.removeItem(at: weightsFile)
+    }
+  }
+
+  /// Half-installed copies a crash or a failed move left behind.
+  private func removePartials() {
     let fm = FileManager.default
     for name in (try? fm.contentsOfDirectory(atPath: modelsDirectory.path)) ?? [] where name.hasPrefix(".partial-") {
       try? fm.removeItem(at: modelsDirectory.appendingPathComponent(name))
-    }
-    if fm.fileExists(atPath: weightsFile.path) {
-      try fm.removeItem(at: weightsFile)
     }
   }
 
