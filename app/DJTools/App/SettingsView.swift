@@ -2,8 +2,8 @@ import AppKit
 import AudioExport
 import SwiftUI
 
-/// Settings (⌘,): a sidebar of sections (results, stems, Apollo, loudness,
-/// credits) and the selected section's form.
+/// Settings (⌘,): a sidebar of sections (results, Track ID, repair,
+/// loudness, credits) and the selected section's form.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("settingsSection") private var section: SettingsSection = .general
@@ -33,7 +33,7 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("Running repairs stop, and the next one downloads about 66 MB again.")
+            Text("Running repairs stop. The next one downloads 66 MB again.")
         }
         .task { await model.refreshApolloState() }
     }
@@ -58,18 +58,16 @@ struct SettingsView: View {
                         Button("Use Default") { settings.outputFolder = AppPaths.defaultOutputFolder }
                     }
                 }
-                FormatPicker(title: "Save files as", selection: $settings.saveFormat)
-            } header: {
-                Text("Results")
+                FormatPicker(title: "Save as", selection: $settings.lastRecipe.format)
             } footer: {
-                Text("Stems go in a “(Stems)” folder per track; Repair writes “<track> (Repaired).\(settings.repairFormat.fileExtension)” and Normalize “<track> (Normalized).\(settings.normalizeFormat.fileExtension)”. Names start from “Artist - Title” once Track ID knows them. AIFF, FLAC and MP3 carry the tags and artwork. “Save files as” sets every tool's file type; each can still be changed in its own section.")
+                Text("“Artist - Title.\(settings.lastRecipe.format.fileExtension)”, stems in “Artist - Title (Stems)”.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             if model.engines.isFake {
                 Section("Engines") {
-                    Text("Demo engines: jobs sleep and write placeholder files. Launched with -useFakeEngines, or the engine packages aren't linked yet.")
+                    Text("Demo engines (-useFakeEngines)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -77,79 +75,38 @@ struct SettingsView: View {
 
         case .trackID:
             Section {
-                Toggle("Identify tracks when they're added", isOn: $settings.identifyOnAdd)
-                Toggle("Rename files when applying", isOn: $settings.renameOnApply)
+                Toggle("Identify tracks when added", isOn: $settings.identifyOnAdd)
+                Toggle("Rename files on Apply", isOn: $settings.renameOnApply)
                 Toggle("Apply sure matches automatically", isOn: $settings.autoApplyMatches)
             } footer: {
-                Text("Track ID listens to three short bits of each track with Shazam (only fingerprints leave this Mac) and fills in the rest from Apple Music. Apply writes title, artist, album, label, year, genre, ISRC and artwork into the file without re-encoding it, and keeps tags like BPM and key. Renaming makes it “Artist - Title”. A sure match is one at least two listens agree on, with a length that fits the file. Apply before importing into Rekordbox: it finds tracks by where they are.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-        case .stems:
-            Section {
-                Picker("Default model", selection: $settings.defaultStemModel) {
-                    ForEach(DJStemModel.allCases) { model in
-                        Text("\(model.title) (\(model.modelName))").tag(model)
-                    }
-                }
-                Text(settings.defaultStemModel.helper)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Keep", selection: $settings.stemChoice) {
-                    Text("All stems").tag(DJStemChoice.all)
-                    Text("Acapella + Instrumental").tag(DJStemChoice.acapellaInstrumental)
-                }
-                FormatPicker(title: "Save stems as", selection: $settings.stemsFormat)
-            } footer: {
-                Text("Stems are named “Artist - Title (Vocals)” and tagged like the track, so they sit together in Rekordbox or Serato. The instrumental is every stem but the vocals, mixed back together. Pick single stems on a track's Stems card.")
+                Text("Shazam + Apple Music. Apply writes the tags without re-encoding.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
         case .apollo:
             Section {
-                FormatPicker(title: "Save repairs as", selection: $settings.repairFormat)
-                if !settings.repairFormat.isLossless {
-                    Label("MP3 cuts the highs the repair just rebuilt (even 320 kbps stops around 20 kHz). Lossless is recommended.",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(DJColor.marker)
-                }
-            }
-            Section {
-                LabeledContent("Status", value: apolloStatus)
+                LabeledContent("Model", value: apolloStatus)
                 Button("Remove Repair Model…", role: .destructive) { isConfirmingReset = true }
                     .disabled(isResetting || model.apolloState == .notInstalled || model.apolloState.isInstalling)
-            } header: {
-                Text("Model")
-            } footer: {
-                Text("Removes the downloaded model (about 66 MB) from Application Support. The next repair downloads it again.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
         case .loudness:
             Section {
-                Picker("Target loudness", selection: $settings.targetLUFS) {
+                Picker("Target", selection: $settings.targetLUFS) {
                     ForEach(AppSettings.targetChoices, id: \.self) { lufs in
                         Text(lufs == AppSettings.defaultTargetLUFS ? "\(DJFormat.lufs(lufs, decimals: 0)) (default)" : DJFormat.lufs(lufs, decimals: 0))
                             .tag(lufs)
                     }
                 }
-                Text("Club masters sit around −6 to −9 LUFS; −14 LUFS is streaming level.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Picker("True-peak ceiling", selection: $settings.ceilingDBTP) {
                     ForEach(AppSettings.ceilingChoices, id: \.self) { dBTP in
                         Text(dBTP == AppSettings.defaultCeilingDBTP ? "\(DJFormat.dBTP(dBTP)) (default)" : DJFormat.dBTP(dBTP))
                             .tag(dBTP)
                     }
                 }
-                FormatPicker(title: "Save normalized tracks as", selection: $settings.normalizeFormat)
-                Toggle("Also normalize repaired tracks", isOn: $settings.normalizeRepairs)
             } footer: {
-                Text("Gain only: never a limiter or compression. When reaching the target would push the true peak past the ceiling, the gain stops at the ceiling and the track lands quieter. Stems are never normalized, so they still sum back to the mix.")
+                Text("Gain only, no limiter. Stops at the ceiling.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -182,7 +139,7 @@ struct SettingsView: View {
             Picker(title, selection: $selection) {
                 Section("Lossless") {
                     ForEach(AudioFileFormat.allCases.filter(\.isLossless)) { format in
-                        Text(format == .aiff ? "AIFF — best for Rekordbox" : format.title).tag(format)
+                        Text(format.title).tag(format)
                     }
                 }
                 Section("Lossy") {
@@ -223,7 +180,7 @@ struct SettingsView: View {
 
 /// The settings window's sidebar entries.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, trackID, stems, apollo, loudness, credits
+    case general, trackID, apollo, loudness, credits
 
     var id: Self { self }
 
@@ -231,7 +188,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .trackID: "Track ID"
-        case .stems: "Stems"
         case .apollo: "Repair"
         case .loudness: "Loudness"
         case .credits: "Credits"
@@ -242,7 +198,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "folder"
         case .trackID: "shazam.logo"
-        case .stems: "square.3.layers.3d"
         case .apollo: "wand.and.stars"
         case .loudness: "speaker.wave.2"
         case .credits: "heart"

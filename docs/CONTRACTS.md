@@ -83,9 +83,12 @@ installer (no Homebrew, no sudo) and keeps uv's cache, Python and venv under
 
 ## app/ — the SwiftUI shell (XcodeGen, `app/project.yml`)
 
-Depends on QualityKit, StemsKit, ApolloMLX, AudioExport and LoudnessKit by local path. Drop files or folders in; each track gets
-actions Track ID, Check Quality, Separate Stems, Repair (Apollo), Normalize Loudness; a job queue shows progress;
-results land in the output folder with Reveal in Finder.
+Depends on QualityKit, StemsKit, ApolloMLX, AudioExport and LoudnessKit by local path. Drop files or folders in;
+each track gets Track ID and a quality check straight away, and a Process sheet opens: Repair → Normalize →
+Stems as switches, one run per track that does them all (`Job.Kind.process`). The steps and file type start
+from the last run (`AppSettings.lastRecipe`; Stems off the first time); Repair starts from the quality
+check's suggestion (on for low quality / fake lossless). A job queue shows progress; results land in the
+output folder with Reveal in Finder.
 
 **Track ID** (`Engines/TrackIdentifier.swift`, behind `TrackIdentifying`): ShazamKit listens to three
 12 s windows (30/50/70 % in), the windows vote, MusicKit's catalog fills in album, label, release
@@ -144,13 +147,14 @@ Atomic write; cancelling the task leaves nothing behind. `gainDB` scales every s
 through (normalization); with a gain, lossless output is always 24-bit. No clipping protection:
 the caller keeps peaks below full scale. The source may be any file AVAudioFile decodes.
 
-The app (`ResultWriter`) runs each heavy engine into a scratch folder, exports, deletes the
-WAVs: `<out>/<name> (Stems)/<name> (Vocals).<ext>`, `<out>/<name> (Repaired).<ext>` and
-`<out>/<name> (Normalized).<ext>`, where `<name>` is "Artist - Title" when the tags (or a Track ID
-match) have both, else the file name. Results are tagged with the file's tags plus the match. A
-separation keeps the stems the job picks (`DJStemChoice`); "instrumental" is every stem but the
-vocals summed. AIFF is the default (Rekordbox reads its tags and artwork); Settings ▸ General's
-"Save files as" sets every tool's type at once.
+The app (`ResultWriter.process`) runs a Process run in a scratch folder and saves once:
+`<out>/<name>.<ext>` (the finished track, when it repaired or normalized; replaced on a re-run) and
+`<out>/<name> (Stems)/<name> (Vocals).<ext>`, where `<name>` is "Artist - Title" when the tags (or a
+Track ID match) have both, else the file name. No suffix on the finished track's name or title: what
+was done goes in the comment tag ("Repaired · −10.0 LUFS"), after the file's own comment. Results are
+tagged with the file's tags plus the match. A separation keeps the stems the run picks
+(`DJStemChoice`); "instrumental" is every stem but the vocals summed. AIFF is the default (Rekordbox
+reads its tags and artwork).
 
 ## Packages/LoudnessKit — loudness measurement and normalization (pure Swift: AVFoundation + Accelerate)
 
@@ -184,9 +188,7 @@ Pure gain, never a limiter or compression: when the target would push the true p
 ceiling, the gain is capped there (which is a cut when the source already peaks above it).
 `loudness <file>… [--target] [--ceiling]` prints the report and plan as JSON.
 
-The app's flow (`ResultWriter.normalize`): measure the source, plan, then `AudioExporter.export`
-the source itself with `gainDB` to `<out>/<track> (Normalized).<ext>` (Settings default AIFF;
-title suffixed " (Normalized)"). Settings' "Also normalize repaired tracks" does the same to
-Apollo's scratch WAV as the repair's last step (`<track> (Repaired).<ext>`). Stems are never
-normalized: they must keep their relative levels to sum back to the mix. Measuring is never
-part of the automatic quality check (it needs a full decode); the Normalize card measures lazily.
+The app's flow (`ResultWriter.process`): measure Apollo's scratch WAV (or the source when not
+repairing), plan, then `AudioExporter.export` it with `gainDB`. The stems are separated from the same
+audio and saved with the same gain, so they still sum back to the finished track. Measuring is never
+part of the automatic quality check (it needs a full decode); the Normalize row measures lazily.

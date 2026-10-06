@@ -38,7 +38,7 @@ struct ApolloSetupContent: View {
                         .font(.dj(17, weight: 650))
                         .tracking(-0.2)
                         .foregroundStyle(DJColor.foreground)
-                    Text("Repair runs on this Mac, so it needs a one-time download of about 66 MB. Setup takes a few seconds on a fast connection. After that, repairs work offline.")
+                    Text("One-time 66 MB download. Runs offline after that.")
                         .djText(.body)
                         .foregroundStyle(DJColor.mutedForeground)
                         .fixedSize(horizontal: false, vertical: true)
@@ -46,11 +46,11 @@ struct ApolloSetupContent: View {
             }
 
             VStack(spacing: 0) {
-                item("cpu", "Model weights", "From Hugging Face, CC BY-SA 4.0 (see Settings ▸ Credits). Checked and converted for Apple silicon on this Mac.")
+                item("cpu", "Apollo model", "Hugging Face · CC BY-SA 4.0")
                 DJDivider()
-                item("bolt", "Runs natively on the GPU", "A repair takes about half the track's length or less on an M-series Air (a 4-minute track ≈ 1½–2 minutes).")
+                item("bolt", "On the GPU", "About half the track's length")
                 DJDivider()
-                item("internaldrive", "Kept in Application Support", "~/Library/Application Support/DJTools. Settings ▸ Repair ▸ Remove Repair Model deletes it.")
+                item("internaldrive", "Application Support", "Remove it in Settings ▸ Repair")
             }
             .djCard()
 
@@ -58,7 +58,7 @@ struct ApolloSetupContent: View {
 
             HStack(spacing: DJSpace.sm) {
                 if trackCount > 0 {
-                    Text(trackCount == 1 ? "Your track is repaired when setup finishes." : "\(trackCount) tracks are repaired when setup finishes.")
+                    Text(trackCount == 1 ? "Your track runs after setup" : "\(trackCount) tracks run after setup")
                         .djText(.caption)
                         .foregroundStyle(DJColor.mutedForeground)
                 }
@@ -99,13 +99,10 @@ struct ApolloSetupContent: View {
                     Spacer()
                 }
                 DJProgressBar(fraction: nil, height: 4, tint: DJColor.ring)
-                Text("You can hide this and keep working; the queue picks up when it's done.")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
             }
             .djTray()
         case .failed(let message):
-            DJNotice(kind: .error, message: "Setup didn't finish: \(message)")
+            DJNotice(kind: .error, message: "Setup failed: \(message)")
         case .ready:
             DJNotice(kind: .info, message: "Repair is ready.")
         case .notInstalled:

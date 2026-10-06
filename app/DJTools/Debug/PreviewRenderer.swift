@@ -27,7 +27,7 @@ enum PreviewRenderer {
         let installing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs,
                                         apollo: .installing("Downloading the repair model (66 MB)"))
         let repairing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.repairJobs, apollo: .ready, showsJobs: true)
-        // Settings say stems as FLAC and repairs as MP3 320: the format menus and the MP3 hint.
+        // Last run saved as MP3 320: the format menu and the MP3 warning beside it.
         let repairAsMP3 = fixtures.model(tracks: fixtures.tracks, jobs: [], apollo: .ready, settings: fixtures.mp3Settings)
 
         var shots: [(String, AnyView)] = [
@@ -43,8 +43,14 @@ enum PreviewRenderer {
             ("08-track-checking", AnyView(PreviewWindow(model: busy, selection: [fixtures.kettama.id]))),
             ("09-track-very-low-source", AnyView(PreviewWindow(model: repairing, selection: [fixtures.burial.id]))),
             ("10-track-repair-as-mp3", AnyView(PreviewWindow(model: repairAsMP3, selection: [fixtures.bicep.id]))),
+            ("20-process-sheet", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id],
+                                                       sheet: AnyView(ProcessSheet(request: ProcessRequest(trackIDs: [fixtures.overmono.id])))))),
+            ("21-process-sheet-multi", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id, fixtures.fred.id, fixtures.floatingPoints.id],
+                                                             sheet: AnyView(ProcessSheet(request: ProcessRequest(trackIDs: [fixtures.overmono.id, fixtures.fred.id, fixtures.floatingPoints.id])))))),
+            ("22-dark-process-sheet", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id],
+                                                            sheet: AnyView(ProcessSheet(request: ProcessRequest(trackIDs: [fixtures.overmono.id])))))),
         ]
-        // Normalize Loudness: measured (−6.2 → −10.0 LUFS) and capped by the ceiling, in a taller window.
+        // The Normalize row: measured (−6.2 → −10.0 LUFS) and capped by the ceiling, in a taller window.
         let normalizing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.normalizeJobs, apollo: .ready, showsJobs: true)
         let tall: [(String, AnyView)] = [
             ("15-normalize-measured", AnyView(PreviewWindow(model: busy, selection: [fixtures.ross.id]))),
@@ -233,10 +239,10 @@ struct PreviewFixtures {
     var tracks: [Track] { [floatingPoints, overmono, fred, ross, kettama, bicep, burial] }
 
     init() {
-        settings.stemsFormat = .aiff
-        settings.repairFormat = .aiff
-        mp3Settings.stemsFormat = .flac
-        mp3Settings.repairFormat = .mp3_320
+        settings.lastRecipe = ProcessRecipe()
+        var mp3 = ProcessRecipe()
+        mp3.format = .mp3_320
+        mp3Settings.lastRecipe = mp3
         let folder = URL.musicDirectory.appending(path: "Promos/October 2026", directoryHint: .isDirectory)
         let now = Date()
         func track(_ file: String, _ verdict: DJQualityVerdict?, bitrate: Int?, cutoff: Double?, duration: TimeInterval,
@@ -258,10 +264,11 @@ struct PreviewFixtures {
                        duration: 653, size: 82_400_000, summary: "Full range up to 22 kHz — genuinely lossless")
         let stemsFolder = URL.musicDirectory.appending(path: "DJ Tools/\(fp.name) (Stems)", directoryHint: .isDirectory)
         fp.results = [
-            TrackResult(kind: .stems(model: .htdemucsFT, folder: stemsFolder,
-                                     stems: Dictionary(uniqueKeysWithValues: DJStemModel.htdemucsFT.stemNames.map {
-                                         ($0, stemsFolder.appending(path: "\($0).aiff"))
-                                     })),
+            TrackResult(kind: .processed(ProcessedFiles(
+                            repaired: false, stemModel: .htdemucsFT, stemsFolder: stemsFolder,
+                            stems: Dictionary(uniqueKeysWithValues: DJStemModel.htdemucsFT.stemNames.map {
+                                ($0, stemsFolder.appending(path: "\($0).aiff"))
+                            }))),
                         finishedAt: now.addingTimeInterval(-3_600)),
         ]
         // Quiet and dynamic: reaching −10 LUFS would clip, so the plan stops at the ceiling.
@@ -286,8 +293,9 @@ struct PreviewFixtures {
                                          loudnessRangeLU: 5.2, duration: 269, sampleRate: 44_100, channels: 2)
         let normalizedPlan = DJNormalizationPlan.pureGain(for: glue.loudness!, target: DJLoudnessTarget(lufs: -10, ceilingDBTP: -1))
         glue.results = [
-            TrackResult(kind: .normalized(output: URL.musicDirectory.appending(path: "DJ Tools/\(glue.name) (Normalized).aiff"),
-                                          plan: normalizedPlan),
+            TrackResult(kind: .processed(ProcessedFiles(
+                            output: URL.musicDirectory.appending(path: "DJ Tools/Bicep - Glue.aiff"),
+                            repaired: true, normalization: normalizedPlan)),
                         finishedAt: now.addingTimeInterval(-600)),
         ]
         bicep = glue
@@ -303,40 +311,53 @@ struct PreviewFixtures {
         return job
     }
 
-    /// A check and a separation running.
+    private static let target = DJLoudnessTarget(lufs: -10, ceilingDBTP: -1)
+
+    private func process(repair: Bool, normalize: Bool = true, stems: Bool = false,
+                         model: DJStemModel = .htdemucs) -> Job.Kind {
+        var recipe = ProcessRecipe()
+        recipe.repair = repair ? .on : .off
+        recipe.normalize = normalize
+        recipe.stems = stems
+        recipe.stemModel = model
+        return .process(recipe, Self.target)
+    }
+
+    /// A check and a Process run going.
     var liveJobs: [Job] {
-        [job(kettama, .quality, .running),
-         job(bicep, .stems(.htdemucs, .all), .running, progress: 0.42),
-         job(fred, .repair, .queued)]
+        var running = job(bicep, process(repair: true, stems: true), .running, progress: 0.42)
+        running.statusText = "Repairing"
+        return [job(kettama, .quality, .running), running, job(fred, process(repair: true), .queued)]
     }
 
-    /// An Apollo repair running (with Apollo's own status line), stems waiting
-    /// behind it: heavy jobs never overlap.
+    /// A repair running (with Apollo's own status line), another run waiting
+    /// behind it: heavy runs never overlap.
     var repairJobs: [Job] {
-        var repair = job(burial, .repair, .running, progress: 0.31)
+        var repair = job(burial, process(repair: true), .running, progress: 0.31)
         repair.statusText = "Repairing"
-        return [repair, job(bicep, .stems(.htdemucs, .all), .queued)]
+        return [repair, job(bicep, process(repair: false, stems: true), .queued)]
     }
 
-    /// A normalize running beside a separation, one waiting.
+    /// A normalize-only run beside a heavy one, one waiting.
     var normalizeJobs: [Job] {
-        let target = DJLoudnessTarget(lufs: -10, ceilingDBTP: -1)
-        var normalizing = job(bicep, .normalize(target), .running, progress: 0.58)
+        var normalizing = job(bicep, process(repair: false), .running, progress: 0.58)
         normalizing.statusText = "Saving AIFF"
-        return [job(fred, .stems(.htdemucs, .all), .running, progress: 0.42),
-                normalizing,
-                job(ross, .normalize(target), .queued)]
+        var separating = job(fred, process(repair: true, stems: true), .running, progress: 0.62)
+        separating.statusText = "Separating stems"
+        return [separating, normalizing, job(ross, process(repair: false), .queued)]
     }
 
     /// Everything the queue panel can show.
     var queueJobs: [Job] {
-        [job(floatingPoints, .stems(.htdemucsFT, .all), .finished, progress: 1,
-             result: URL.musicDirectory.appending(path: "DJ Tools/\(floatingPoints.name) (Stems)")),
-         job(ross, .repair, .failed("Repair stopped: the model ran out of memory. Close other apps and try again.")),
-         job(kettama, .quality, .running),
-         job(bicep, .stems(.htdemucs, .all), .running, progress: 0.42),
-         job(fred, .repair, .queued),
-         job(overmono, .stems(.htdemucs6s, .all), .queued)]
+        var running = job(bicep, process(repair: true, stems: true), .running, progress: 0.42)
+        running.statusText = "Repairing"
+        return [job(floatingPoints, process(repair: false, normalize: false, stems: true, model: .htdemucsFT), .finished, progress: 1,
+                    result: URL.musicDirectory.appending(path: "DJ Tools/\(floatingPoints.name) (Stems)")),
+                job(ross, process(repair: true), .failed("Repair stopped: out of memory. Close other apps and try again.")),
+                job(kettama, .quality, .running),
+                running,
+                job(fred, process(repair: true), .queued),
+                job(overmono, process(repair: true, stems: true, model: .htdemucs6s), .queued)]
     }
 
     func model(tracks: [Track], jobs: [Job], apollo: DJApolloSetupState = .notInstalled, showsJobs: Bool = false,

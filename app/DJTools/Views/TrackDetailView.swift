@@ -18,14 +18,6 @@ struct TrackDetailView: View {
 struct TrackDetailContent: View {
     @Environment(AppModel.self) private var model
     let ids: [Track.ID]
-    /// The picker's choice; Settings' default until changed.
-    @State private var stemModel: DJStemModel?
-    /// The stems to keep; Settings' choice until changed.
-    @State private var stemOutputs: Set<String>?
-    /// The format menus' choices for this job; Settings' defaults until changed.
-    @State private var stemsFormat: AudioFileFormat?
-    @State private var repairFormat: AudioFileFormat?
-    @State private var normalizeFormat: AudioFileFormat?
 
     var body: some View {
         let tracks = ids.compactMap(model.track)
@@ -33,195 +25,23 @@ struct TrackDetailContent: View {
             if tracks.count == 1, let track = tracks.first {
                 TrackHeader(track: track)
                 if !track.fileExists {
-                    DJNotice(kind: .warning, message: "Can't find this file any more. It may have been moved or renamed; drop it in again to keep working on it.")
+                    DJNotice(kind: .warning, message: "File not found. Drop it in again.")
+                }
+                ProcessCard(ids: ids, initial: model.settings.lastRecipe)
+                if !track.results.isEmpty {
+                    ResultsSection(track: track, outputFolder: model.settings.outputFolder)
                 }
                 TrackIDSection(track: track, job: model.job(for: track.id, kind: .identify))
                 QualitySection(track: track, job: model.job(for: track.id, kind: .quality))
             } else {
                 SelectionHeader(tracks: tracks)
-            }
-            toolsSection(tracks)
-            if tracks.count == 1, let track = tracks.first, !track.results.isEmpty {
-                ResultsSection(track: track, outputFolder: model.settings.outputFolder)
+                ProcessCard(ids: ids, initial: model.settings.lastRecipe)
             }
         }
         .padding(.horizontal, DJSpace.xxxl)
         .padding(.top, DJSpace.lg)
         .padding(.bottom, DJSpace.xxxl)
         .frame(maxWidth: DJSize.detailMaxWidth, alignment: .leading)
-    }
-
-    private func toolsSection(_ tracks: [Track]) -> some View {
-        let ids = tracks.map(\.id)
-        let chosen = stemModel ?? model.settings.defaultStemModel
-        let keep = stemOutputs ?? Set(model.settings.stemChoice.outputs(for: chosen))
-        let choice: DJStemChoice = keep == Set(chosen.stemNames) ? .all : .custom(keep)
-        let stemsAs = stemsFormat ?? model.settings.stemsFormat
-        let repairAs = repairFormat ?? model.settings.repairFormat
-        let lowCount = tracks.filter(\.needsRepair).count
-        return VStack(alignment: .leading, spacing: DJSpace.sm) {
-            DJSectionHeader("Tools", detail: tracks.count > 1 ? "Runs on all \(tracks.count) selected" : nil)
-            VStack(alignment: .leading, spacing: DJSpace.md) {
-                HStack(alignment: .top, spacing: DJSpace.md) {
-                    ToolCard(
-                        systemImage: "square.3.layers.3d",
-                        title: "Separate Stems",
-                        message: "Writes “Artist - Title (Vocals)” and the rest to a “(Stems)” folder. A few minutes a track.",
-                        jobs: tracks.compactMap { model.job(for: $0.id, kind: .stems(chosen, choice)) },
-                        multi: tracks.count > 1
-                    ) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            DJSegmented(options: DJStemModel.allCases, selection: Binding(
-                                get: { chosen }, set: { stemModel = $0 }
-                            )) { $0.title }
-                            Text("\(chosen.modelName) — \(chosen.helper)")
-                                .djText(.caption)
-                                .foregroundStyle(DJColor.mutedForeground)
-                                .fixedSize(horizontal: false, vertical: true)
-                            StemPicker(model: chosen, selection: Binding(get: { keep }, set: { stemOutputs = $0 }))
-                                .padding(.top, 2)
-                        }
-                    } action: {
-                        VStack(spacing: 6) {
-                            Button(tracks.count > 1 ? "Separate \(tracks.count) Tracks" : "Separate Stems", systemImage: "play.fill") {
-                                model.separateStems(ids, model: chosen, choice: choice, format: stemsAs)
-                            }
-                            // The suggested repair gets the strong button.
-                            .buttonStyle(.dj(lowCount > 0 ? .outline : .primary, fullWidth: true))
-                            .disabled(allBusy(ids, kind: .stems(chosen, choice)) || keep.isEmpty)
-                            FormatMenu(selection: Binding(get: { stemsAs }, set: { stemsFormat = $0 }),
-                                       defaultFormat: model.settings.stemsFormat)
-                        }
-                    }
-
-                    ToolCard(
-                        systemImage: "wand.and.stars",
-                        title: "Repair Audio",
-                        message: "Rebuilds the high end that lossy encoding cut off and writes a new file. The original stays as it is. Takes about half the track's length or less on an M-series Air (a 4-minute track ≈ 1½–2 minutes).",
-                        jobs: tracks.compactMap { model.job(for: $0.id, kind: .repair) },
-                        multi: tracks.count > 1,
-                        suggestion: suggestion(tracks: tracks, lowCount: lowCount)
-                    ) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            if model.apolloState != .ready {
-                                Label("First use downloads the repair model, about 66 MB.", systemImage: "arrow.down.circle")
-                                    .djText(.caption)
-                                    .foregroundStyle(DJColor.mutedForeground)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if let note = lowSourceNote(tracks) {
-                                Label(note, systemImage: "ear")
-                                    .djText(.caption)
-                                    .foregroundStyle(DJColor.mutedForeground)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if !repairAs.isLossless {
-                                MP3RepairHint()
-                            }
-                        }
-                    } action: {
-                        VStack(spacing: 6) {
-                            Button(repairTitle(tracks: tracks, lowCount: lowCount), systemImage: "wand.and.stars") {
-                                // Several selected: repair the ones that need it, or all if none do.
-                                let targets = lowCount > 0 && tracks.count > 1 ? tracks.filter(\.needsRepair).map(\.id) : ids
-                                model.repair(targets, format: repairAs)
-                            }
-                            .buttonStyle(.dj(lowCount > 0 ? .accent : .outline, fullWidth: true))
-                            .disabled(allBusy(ids, kind: .repair))
-                            FormatMenu(selection: Binding(get: { repairAs }, set: { repairFormat = $0 }),
-                                       defaultFormat: model.settings.repairFormat)
-                        }
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                normalizeCard(tracks)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// Normalize Loudness: full width under the other two, the measurement
-    /// on the left and the button on the right.
-    private func normalizeCard(_ tracks: [Track]) -> some View {
-        let ids = tracks.map(\.id)
-        let target = model.settings.loudnessTarget
-        let normalizeAs = normalizeFormat ?? model.settings.normalizeFormat
-        let anyFile = tracks.contains(where: \.fileExists)
-        return ToolCard(
-            systemImage: "speaker.wave.2",
-            title: "Normalize Loudness",
-            message: "Brings \(tracks.count > 1 ? "each track" : "the track") to \(DJFormat.lufs(target.lufs, decimals: 0)) with one clean gain change. No limiter, no compression: the dynamics stay as they were mastered.",
-            jobs: tracks.compactMap { model.job(for: $0.id, kind: .normalize(target)) },
-            multi: tracks.count > 1,
-            wide: true
-        ) {
-            VStack(alignment: .leading, spacing: DJSpace.md) {
-                if tracks.count == 1, let track = tracks.first {
-                    LoudnessReadout(track: track, measuring: model.job(for: track.id, kind: .loudness), target: target)
-                        .task(id: track.id) { model.measureLoudnessIfNeeded([track.id]) }
-                } else {
-                    LoudnessSummary(tracks: tracks, target: target)
-                        .task(id: ids) { model.measureLoudnessIfNeeded(Array(ids.prefix(12))) }
-                }
-                Label("Rekordbox's Auto Gain is non-destructive, applied at playback. This writes a new “(Normalized)” file and leaves the original untouched.",
-                      systemImage: "info.circle")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } action: {
-            VStack(spacing: 6) {
-                Button(tracks.count > 1 ? "Normalize \(tracks.count) Tracks" : "Normalize", systemImage: "speaker.wave.2") {
-                    model.normalize(ids, format: normalizeAs)
-                }
-                .buttonStyle(.dj(.outline, fullWidth: true))
-                .disabled(!anyFile || allBusy(ids, kind: .normalize(target)))
-                FormatMenu(selection: Binding(get: { normalizeAs }, set: { normalizeFormat = $0 }),
-                           defaultFormat: model.settings.normalizeFormat)
-                Text("Peak ceiling \(DJFormat.dBTP(target.ceilingDBTP)) · change both in Settings")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !normalizeAs.isLossless {
-                    Label("MP3 encoding can push peaks a little past the ceiling.", systemImage: "exclamationmark.triangle")
-                        .djText(.caption)
-                        .foregroundStyle(DJColor.marker)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-
-    /// Every track already has this tool queued or running (the queue ignores repeats anyway).
-    private func allBusy(_ ids: [Track.ID], kind: Job.Kind) -> Bool {
-        ids.allSatisfy { model.job(for: $0, kind: kind)?.state.isActive == true }
-    }
-
-    /// A gentle heads-up for very low-bitrate or low-sample-rate sources.
-    private func lowSourceNote(_ tracks: [Track]) -> String? {
-        let low = tracks.filter(\.isVeryLowSource)
-        guard !low.isEmpty else { return nil }
-        let advice = "Results vary from sources this rough, so listen before replacing the original."
-        if tracks.count == 1, let quality = low.first?.quality {
-            let why = quality.sampleRate < 44_100
-                ? "This file was recorded at \(DJFormat.kHz(quality.sampleRate))."
-                : "This is a \(quality.declaredBitrateKbps ?? 0) kbps file."
-            return "\(why) \(advice)"
-        }
-        return "\(low.count) of these are very low bitrate. \(advice)"
-    }
-
-    private func suggestion(tracks: [Track], lowCount: Int) -> String? {
-        guard lowCount > 0 else { return nil }
-        if tracks.count == 1 { return "Suggested" }
-        return "\(lowCount) of \(tracks.count) need it"
-    }
-
-    private func repairTitle(tracks: [Track], lowCount: Int) -> String {
-        if tracks.count == 1 { return "Repair Audio" }
-        if lowCount > 0 { return "Repair \(DJFormat.count(lowCount, "Track"))" }
-        return "Repair \(tracks.count) Tracks"
     }
 }
 
@@ -273,7 +93,7 @@ private struct SelectionHeader: View {
             if !pending.isEmpty {
                 HStack(spacing: DJSpace.md) {
                     Image(systemName: "shazam.logo").foregroundStyle(DJColor.ring)
-                    Text("Track ID matched \(DJFormat.count(pending.count, "track")). Check them one by one, or apply them all.")
+                    Text("\(DJFormat.count(pending.count, "Track ID match")) to apply")
                         .djText(.body)
                         .foregroundStyle(DJColor.foreground)
                     Spacer(minLength: DJSpace.md)
@@ -351,10 +171,7 @@ private struct QualitySection: View {
     @ViewBuilder private var content: some View {
         if job?.state.isActive == true {
             VStack(alignment: .leading, spacing: DJSpace.sm) {
-                Text("Checking quality…").djText(.bodyMedium).foregroundStyle(DJColor.foreground)
-                Text("Reading the file and looking for where the highs stop.")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
+                Text("Checking…").djText(.bodyMedium).foregroundStyle(DJColor.foreground)
                 DJProgressBar(fraction: nil, height: 4)
                     .frame(maxWidth: 240)
                     .padding(.top, 2)
@@ -364,7 +181,7 @@ private struct QualitySection: View {
         } else if let report = track.quality {
             QualityCard(report: report, fileSize: track.fileSize)
         } else if let error = track.qualityError {
-            DJNotice(kind: .error, message: "Couldn't check this file: \(error)")
+            DJNotice(kind: .error, message: "Couldn't check: \(error)")
         } else {
             Text("Not checked yet.")
                 .djText(.body)
@@ -387,19 +204,13 @@ struct QualityCard: View {
                     .foregroundStyle(report.verdict.tint)
                     .frame(width: 22)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: DJSpace.sm) {
-                        Text(report.summary)
-                            .djText(.headline)
-                            .foregroundStyle(DJColor.foreground)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: DJSpace.sm)
-                        QualityBadge(verdict: report.verdict, large: true)
-                    }
-                    Text(report.verdict.explanation)
-                        .djText(.caption)
-                        .foregroundStyle(DJColor.mutedForeground)
+                HStack(spacing: DJSpace.sm) {
+                    Text(report.summary)
+                        .djText(.headline)
+                        .foregroundStyle(DJColor.foreground)
                         .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: DJSpace.sm)
+                    QualityBadge(verdict: report.verdict, large: true)
                 }
             }
             .padding(DJSpace.lg)
@@ -525,196 +336,6 @@ struct CutoffMeter: View {
     }
 }
 
-// MARK: - Tools
-
-/// One tool: what it does, its options, its button, and its job(s) for
-/// the selection. `suggestion` highlights it ("Suggested").
-private struct ToolCard<Options: View, Action: View>: View {
-    @Environment(AppModel.self) private var model
-    let systemImage: String
-    let title: String
-    let message: String
-    let jobs: [Job]
-    let multi: Bool
-    var suggestion: String?
-    /// Full width: message and options on the left, job and button on the right.
-    var wide = false
-    @ViewBuilder var options: Options
-    @ViewBuilder var action: Action
-
-    var body: some View {
-        if wide {
-            card {
-                titleRow
-                HStack(alignment: .top, spacing: DJSpace.xl) {
-                    VStack(alignment: .leading, spacing: DJSpace.md) {
-                        messageText
-                        options
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    VStack(alignment: .leading, spacing: DJSpace.md) {
-                        jobStatus
-                        action
-                    }
-                    .frame(width: 210)
-                }
-            }
-        } else {
-            card {
-                titleRow
-                messageText
-                options
-                Spacer(minLength: 0)
-                jobStatus
-                action
-            }
-        }
-    }
-
-    private var messageText: some View {
-        Text(message)
-            .djText(.caption)
-            .foregroundStyle(DJColor.mutedForeground)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: DJSpace.md, content: content)
-            .padding(DJSpace.lg)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(DJColor.card, in: RoundedRectangle(cornerRadius: DJRadius.xl))
-            .overlay {
-                RoundedRectangle(cornerRadius: DJRadius.xl)
-                    .strokeBorder(suggestion != nil ? DJColor.ring.opacity(0.8) : DJColor.border.opacity(0.8),
-                                  lineWidth: suggestion != nil ? 1.5 : 1)
-            }
-    }
-
-    private var titleRow: some View {
-        // The badge beside the title, or under it when the card is narrow.
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: DJSpace.sm) {
-                titleLabel
-                Spacer(minLength: DJSpace.xs)
-                badge
-            }
-            VStack(alignment: .leading, spacing: DJSpace.sm) {
-                titleLabel
-                badge
-            }
-        }
-    }
-
-    private var titleLabel: some View {
-        HStack(spacing: DJSpace.sm) {
-            Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(suggestion != nil ? DJColor.ring : DJColor.mutedForeground)
-                .frame(width: 18)
-                .accessibilityHidden(true)
-            Text(title)
-                .djText(.headline)
-                .foregroundStyle(DJColor.foreground)
-                .lineLimit(1)
-                .fixedSize()
-        }
-    }
-
-    @ViewBuilder private var badge: some View {
-        if let suggestion {
-            Text(suggestion)
-                .font(.dj(10, weight: 600))
-                .foregroundStyle(DJColor.ring)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(DJColor.ring.opacity(0.14)))
-                .fixedSize()
-        }
-    }
-
-    /// The selection's job for this tool: one row for a single track, a
-    /// tally for several.
-    @ViewBuilder private var jobStatus: some View {
-        if multi {
-            let active = jobs.filter(\.state.isActive).count
-            let done = jobs.filter { $0.state == .finished }.count
-            if active + done > 0 {
-                Text([active > 0 ? "\(active) in the queue" : nil, done > 0 ? "\(done) done" : nil]
-                    .compactMap { $0 }.joined(separator: " · "))
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
-            }
-        } else if let job = jobs.first, job.state != .cancelled {
-            JobRow(
-                job: job, showsTrack: false,
-                cancel: { model.cancel(job.id) },
-                reveal: { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
-                retry: { model.retry(job.id) }
-            )
-            .padding(DJSpace.sm)
-            .background(DJColor.muted.opacity(0.5), in: RoundedRectangle(cornerRadius: DJRadius.lg))
-        }
-    }
-}
-
-/// "Save as AIFF ⌄" under a tool's button: this job's file type, Settings'
-/// default until changed.
-struct FormatMenu: View {
-    @Binding var selection: AudioFileFormat
-    let defaultFormat: AudioFileFormat
-
-    var body: some View {
-        HStack(spacing: -4) {
-            Text("Save as")
-                .djText(.caption)
-                .foregroundStyle(DJColor.mutedForeground)
-            Menu {
-                Picker("Lossless", selection: $selection) {
-                    ForEach(AudioFileFormat.allCases.filter(\.isLossless)) { item($0) }
-                }
-                .pickerStyle(.inline)
-                Picker("MP3", selection: $selection) {
-                    ForEach(AudioFileFormat.allCases.filter { !$0.isLossless }) { item($0) }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                HStack(spacing: 4) {
-                    Text(selection.shortTitle)
-                        .font(.dj(12, weight: 600))
-                        .foregroundStyle(DJColor.foreground)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(DJColor.mutedForeground)
-                }
-                .frame(minHeight: 20)
-                .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.dj(.ghost, size: .small))
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("The file type for this job. The default is in Settings.")
-            .accessibilityLabel("Save as \(selection.title)")
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func item(_ format: AudioFileFormat) -> some View {
-        Text(format == defaultFormat ? "\(format.title) (default)" : format.title).tag(format)
-    }
-}
-
-/// Repair saved as MP3: the encoder cuts off the very highs Apollo rebuilt.
-struct MP3RepairHint: View {
-    var body: some View {
-        Label("MP3 cuts the highs the repair just rebuilt (even 320 kbps stops around 20 kHz). Lossless is recommended.",
-              systemImage: "exclamationmark.triangle")
-            .djText(.caption)
-            .foregroundStyle(DJColor.marker)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
 // MARK: - Results
 
 private struct ResultsSection: View {
@@ -753,6 +374,18 @@ private struct ResultRow: View {
                         .foregroundStyle(DJColor.mutedForeground)
                 }
                 switch result.kind {
+                case .processed(let files):
+                    HStack(spacing: 4) {
+                        ForEach(chips(files), id: \.self) { chip in
+                            Text(chip)
+                                .font(.dj(11, weight: 500))
+                                .monospacedDigit()
+                                .foregroundStyle(DJColor.foreground)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(DJColor.muted))
+                        }
+                    }
                 case .stems(let model, _, let stems):
                     HStack(spacing: 4) {
                         ForEach((model.stemNames + [DJStemChoice.instrumental]).filter { stems[$0] != nil }, id: \.self) { name in
@@ -790,8 +423,18 @@ private struct ResultRow: View {
         .padding(.vertical, 10)
     }
 
+    /// "Repaired", "−10.0 LUFS", "4 stems".
+    private func chips(_ files: ProcessedFiles) -> [String] {
+        var chips: [String] = []
+        if files.repaired { chips.append("Repaired") }
+        if let plan = files.normalization { chips.append(DJFormat.lufs(plan.resultingLUFS)) }
+        if let stems = files.stems { chips.append(DJFormat.count(stems.count, "stem")) }
+        return chips
+    }
+
     private var icon: String {
         switch result.kind {
+        case .processed(let files): files.output == nil ? "square.3.layers.3d" : "waveform"
         case .stems: "square.3.layers.3d"
         case .repaired: "wand.and.stars"
         case .normalized: "speaker.wave.2"
@@ -800,6 +443,7 @@ private struct ResultRow: View {
 
     private var title: String {
         switch result.kind {
+        case .processed(let files): (files.output ?? files.stemsFolder)?.lastPathComponent ?? "Processed"
         case .stems(let model, _, _): "Stems · \(model.modelName)"
         case .repaired: "Repaired"
         case .normalized: "Normalized"
@@ -814,188 +458,5 @@ extension DJNormalizationPlan {
     var change: String {
         let from = resultingLUFS - gainDB
         return "\(DJFormat.signed(from)) → \(DJFormat.lufs(resultingLUFS)), \(DJFormat.gain(gainDB))"
-    }
-}
-
-/// One track's measured loudness, true peak and range, and what the gain
-/// change will do; "Measuring…" while LoudnessKit decodes the file.
-struct LoudnessReadout: View {
-    @Environment(AppModel.self) private var model
-    let track: Track
-    let measuring: Job?
-    let target: DJLoudnessTarget
-
-    var body: some View {
-        if let report = track.loudness {
-            VStack(alignment: .leading, spacing: DJSpace.sm) {
-                HStack(spacing: 0) {
-                    fact("Loudness", DJFormat.lufs(report.integratedLUFS))
-                    DJVerticalDivider()
-                    fact("True peak", report.truePeakDBTP.isFinite ? DJFormat.dBTP(report.truePeakDBTP) : "—")
-                    DJVerticalDivider()
-                    fact("Range", report.loudnessRangeLU.map { "\(DJFormat.signed($0)) LU" } ?? "—")
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .background(DJColor.muted.opacity(0.5), in: RoundedRectangle(cornerRadius: DJRadius.lg))
-                PlanLine(report: report, plan: model.engines.loudness.plan(for: report, target: target))
-            }
-        } else if let job = measuring, job.state.isActive {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Measuring loudness…").djText(.bodyMedium).foregroundStyle(DJColor.foreground)
-                DJProgressBar(fraction: job.progress, height: 4)
-                    .frame(maxWidth: 240)
-            }
-        } else if let error = track.loudnessError {
-            HStack(alignment: .firstTextBaseline, spacing: DJSpace.sm) {
-                Text("Couldn't measure: \(error)")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.destructive)
-                    .fixedSize(horizontal: false, vertical: true)
-                DJLinkButton("Try Again") { model.measureLoudnessAgain(track.id) }
-            }
-        } else {
-            Text("Measured when you open the track.")
-                .djText(.caption)
-                .foregroundStyle(DJColor.mutedForeground)
-        }
-    }
-
-    private func fact(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).djText(.caption).foregroundStyle(DJColor.mutedForeground).lineLimit(1)
-            Text(value)
-                .font(.dj(13, weight: 600))
-                .monospacedDigit()
-                .foregroundStyle(DJColor.foreground)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// "−6.2 LUFS → −10.0 LUFS, −3.8 dB", or the capped case in amber with why.
-struct PlanLine: View {
-    let report: DJLoudnessReport
-    let plan: DJNormalizationPlan
-
-    var body: some View {
-        if report.isSilent {
-            Text("Silent: nothing to normalize.")
-                .djText(.caption)
-                .foregroundStyle(DJColor.mutedForeground)
-        } else if plan.limitedByCeiling {
-            VStack(alignment: .leading, spacing: 3) {
-                Label {
-                    Text("Capped by the peak ceiling: reaches \(DJFormat.lufs(plan.resultingLUFS)), \(DJFormat.gain(plan.gainDB))")
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle")
-                }
-                .djText(.captionMedium)
-                .foregroundStyle(DJColor.marker)
-                Text("Reaching \(DJFormat.lufs(plan.targetLUFS, decimals: 0)) would put the true peak at \(DJFormat.dBTP(report.truePeakDBTP + plan.targetLUFS - report.integratedLUFS)), past the \(DJFormat.dBTP(plan.ceilingDBTP)) ceiling. Gain only, so it stops there.")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } else {
-            Label {
-                Text("\(DJFormat.lufs(report.integratedLUFS)) → \(DJFormat.lufs(plan.resultingLUFS)), \(DJFormat.gain(plan.gainDB))")
-                    .monospacedDigit()
-            } icon: {
-                Image(systemName: "arrow.right.circle")
-            }
-            .djText(.captionMedium)
-            .foregroundStyle(DJColor.foreground)
-        }
-    }
-}
-
-/// Several tracks: the spread of what's been measured so far.
-struct LoudnessSummary: View {
-    @Environment(AppModel.self) private var model
-    let tracks: [Track]
-    let target: DJLoudnessTarget
-
-    var body: some View {
-        let measured = tracks.compactMap(\.loudness).filter { !$0.isSilent }
-        VStack(alignment: .leading, spacing: 4) {
-            if measured.isEmpty {
-                Text("Each track is measured, then set to \(DJFormat.lufs(target.lufs, decimals: 0)).")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
-            } else {
-                let levels = measured.map(\.integratedLUFS)
-                let capped = measured.filter { model.engines.loudness.plan(for: $0, target: target).limitedByCeiling }.count
-                Text(measured.count == tracks.count
-                     ? "Now \(DJFormat.signed(levels.min()!)) to \(DJFormat.lufs(levels.max()!))"
-                     : "\(measured.count) of \(tracks.count) measured: \(DJFormat.signed(levels.min()!)) to \(DJFormat.lufs(levels.max()!))")
-                    .djText(.bodyMedium)
-                    .monospacedDigit()
-                    .foregroundStyle(DJColor.foreground)
-                if capped > 0 {
-                    Label("\(capped) would be capped by the \(DJFormat.dBTP(target.ceilingDBTP)) peak ceiling and land below the target.",
-                          systemImage: "exclamationmark.triangle")
-                        .djText(.caption)
-                        .foregroundStyle(DJColor.marker)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-}
-
-/// Which stems to keep: a chip per stem plus Instrumental, and two presets.
-private struct StemPicker: View {
-    let model: DJStemModel
-    @Binding var selection: Set<String>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: DJSpace.sm) {
-                Text("Keep").djText(.caption).foregroundStyle(DJColor.mutedForeground)
-                Spacer(minLength: 0)
-                DJLinkButton("All") { selection = Set(model.stemNames) }
-                DJLinkButton("Acapella + Instrumental") { selection = ["vocals", DJStemChoice.instrumental] }
-            }
-            FlowChips(items: model.stemNames + [DJStemChoice.instrumental], selection: $selection)
-        }
-    }
-}
-
-private struct FlowChips: View {
-    let items: [String]
-    @Binding var selection: Set<String>
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 4) { chips(items) }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) { chips(Array(items.prefix((items.count + 1) / 2))) }
-                HStack(spacing: 4) { chips(Array(items.dropFirst((items.count + 1) / 2))) }
-            }
-        }
-    }
-
-    private func chips(_ names: [String]) -> some View {
-        ForEach(names, id: \.self) { name in
-            let on = selection.contains(name)
-            Button {
-                if on { selection.remove(name) } else { selection.insert(name) }
-            } label: {
-                Text(name.capitalized)
-                    .font(.dj(11, weight: on ? 600 : 500))
-                    .foregroundStyle(on ? DJColor.primaryForeground : DJColor.mutedForeground)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(on ? DJColor.primary : DJColor.muted))
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(on ? .isSelected : [])
-        }
     }
 }

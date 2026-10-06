@@ -56,16 +56,21 @@ struct MainView: View {
         .sheet(item: $model.apolloSetup) { request in
             ApolloSetupSheet(request: request)
         }
+        .sheet(item: $model.processRequest) { request in
+            ProcessSheet(request: request)
+        }
         .onChange(of: model.tracks.map(\.id)) { _, ids in
             selection.formIntersection(ids)
         }
         .onChange(of: DockStatus(model: model)) { _, status in status.show() }
     }
 
-    /// Adds, and selects the first new track when nothing is selected.
+    /// Adds, selects the new tracks and asks what to do with them.
     private func add(_ urls: [URL]) {
         let added = model.add(urls)
-        if selection.isEmpty, let first = added.first { selection = [first] }
+        guard !added.isEmpty else { return }
+        selection = Set(added)
+        model.processRequest = ProcessRequest(trackIDs: added)
     }
 
     private var selectedIDs: [Track.ID] {
@@ -103,7 +108,7 @@ struct MainView: View {
             .keyboardShortcut("j")
             .help(model.activeJobCount > 0 ? "\(DJFormat.count(model.activeJobCount, "job")) in the queue (⌘J)" : "Show the queue (⌘J)")
             Button("Settings", systemImage: "gearshape") { openSettings() }
-                .help("Output folder, default stem model, repair, loudness (⌘,)")
+                .help("Settings (⌘,)")
         }
     }
 }

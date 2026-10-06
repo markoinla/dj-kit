@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Nothing selected: one big drop target and what the three tools do.
+/// Nothing selected: one big drop target and the steps a track goes through.
 struct WelcomeView: View {
     var isTargeted: Bool
     var hasTracks = false
@@ -23,37 +23,39 @@ struct WelcomeContent: View {
     var add: () -> Void
 
     var body: some View {
-        VStack(spacing: DJSpace.xl) {
+        VStack(spacing: DJSpace.lg) {
             DJEmptyState(
                 systemImage: "square.and.arrow.down",
                 title: hasTracks ? "Drop more tracks, or pick one" : "Drop tracks here",
-                message: "Or a folder of them. MP3, M4A, FLAC, WAV or AIFF. Each one gets a quality check as soon as it lands.",
+                message: "MP3, M4A, FLAC, WAV, AIFF",
                 isTargeted: isTargeted
             ) {
                 Button("Choose Files…", action: add)
                     .buttonStyle(.dj(.primary))
             }
-            HStack(alignment: .top, spacing: DJSpace.md) {
-                DJInfoCard(
-                    systemImage: "waveform.badge.magnifyingglass",
-                    title: "Check Quality",
-                    message: "Spots low-bitrate rips and fake lossless files by where the highs stop."
-                )
-                DJInfoCard(
-                    systemImage: "square.3.layers.3d",
-                    title: "Separate Stems",
-                    message: "Vocals, drums, bass and the rest as WAVs, ready for Rekordbox."
-                )
-                DJInfoCard(
-                    systemImage: "wand.and.stars",
-                    title: "Repair Audio",
-                    message: "Rebuilds the top end of lossy files. Runs on this Mac."
-                )
+            HStack(spacing: DJSpace.sm) {
+                step("wand.and.stars", "Repair")
+                arrow
+                step("speaker.wave.2", "Normalize")
+                arrow
+                step("square.3.layers.3d", "Stems")
             }
-            .fixedSize(horizontal: false, vertical: true)
+            .djText(.caption)
+            .foregroundStyle(DJColor.mutedForeground)
         }
         .padding(DJSpace.xxxl)
-        .frame(maxWidth: 760)
+        .frame(maxWidth: 640)
+    }
+
+    private func step(_ systemImage: String, _ title: String) -> some View {
+        Label(title, systemImage: systemImage)
+    }
+
+    private var arrow: some View {
+        Image(systemName: "arrow.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(DJColor.mutedForeground.opacity(0.6))
+            .accessibilityHidden(true)
     }
 }
 

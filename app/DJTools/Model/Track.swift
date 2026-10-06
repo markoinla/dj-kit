@@ -10,7 +10,7 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     var quality: DJQualityReport?
     /// The last quality check's failure.
     var qualityError: String?
-    /// Measured on demand (the Normalize card, or a normalize run), never
+    /// Measured on demand (the Normalize row, or a Process run), never
     /// by the automatic quality check: it takes a full decode.
     var loudness: DJLoudnessReport?
     var loudnessError: String?
@@ -74,11 +74,23 @@ enum IdentityStatus: String, Codable, Sendable {
     case dismissed
 }
 
+/// What a Process run saved: the finished track (when it repaired or
+/// normalized) and the stems folder (when it separated).
+struct ProcessedFiles: Codable, Sendable, Equatable {
+    var output: URL?
+    var repaired: Bool
+    var normalization: DJNormalizationPlan?
+    var stemModel: DJStemModel?
+    var stemsFolder: URL?
+    var stems: [String: URL]?
+}
+
 /// Something a tool wrote for a track.
 struct TrackResult: Identifiable, Codable, Sendable, Equatable {
     enum Kind: Codable, Sendable, Equatable {
+        case processed(ProcessedFiles)
+        // Before Process: one tool per run. Kept so older libraries still load.
         case stems(model: DJStemModel, folder: URL, stems: [String: URL])
-        /// `normalization` when "Also normalize repaired tracks" was on.
         case repaired(output: URL, normalization: DJNormalizationPlan? = nil)
         case normalized(output: URL, plan: DJNormalizationPlan)
     }
@@ -90,6 +102,7 @@ struct TrackResult: Identifiable, Codable, Sendable, Equatable {
     /// What Reveal in Finder selects.
     var revealURL: URL {
         switch kind {
+        case .processed(let files): files.output ?? files.stemsFolder ?? URL.musicDirectory
         case .stems(_, let folder, _): folder
         case .repaired(let output, _), .normalized(let output, _): output
         }
@@ -105,17 +118,6 @@ extension DJQualityVerdict {
         case .lowQuality: "Low quality"
         case .fakeLossless: "Fake lossless"
         case .unknown: "Unknown"
-        }
-    }
-
-    /// A sentence for the detail pane, under the summary.
-    var explanation: String {
-        switch self {
-        case .lossless: "Nothing to fix. The highs run all the way up."
-        case .goodLossy: "A high-bitrate encode. Fine on a club system."
-        case .lowQuality: "The top end is missing, and it will show on a big system. Repair can rebuild some of it."
-        case .fakeLossless: "A lossy file re-saved as lossless, so the size lies. Repair can rebuild some of the highs."
-        case .unknown: "The check couldn't tell."
         }
     }
 }

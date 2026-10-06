@@ -7,27 +7,26 @@ import Foundation
 /// Runs the app's own engine adapters (the same `Engines` the window uses,
 /// not the packages directly) on one file, headless, then prints one JSON
 /// object to stdout and exits: 0 when every step passed, 1 otherwise.
-/// Progress goes to stderr. Steps run one after another (stems and Apollo
-/// each peak around 6 GB, never together):
+/// Progress goes to stderr. Steps run one after another (Apollo and the
+/// stems each peak at several GB, never together):
 ///
 /// 1. quality check;
 /// 1b. with `-selfTestIdentify`: Track ID (Shazam + Apple Music; needs the
 ///    team-signed build);
-/// 2. stems with htdemucs (skip with `-selfTestSkipStems`; `-selfTestAcapella`
-///    keeps only vocals and the instrumental);
-/// 3. with `-selfTestApollo`: Apollo install if needed, then a repair
-///    (normalized as its last step when `-selfTestNormalize` is given too,
-///    like Settings' "Also normalize repaired tracks");
-/// 4. with `-selfTestNormalize`: Normalize Loudness to `-selfTestTarget`
-///    LUFS (default −10) under a `-selfTestCeiling` dBTP ceiling (default
-///    −1). The output is measured again with LoudnessKit and must land
-///    within ±0.2 LU of the target, or, when the plan was capped, on the
-///    ceiling (±0.1 dB; lossy output only has to stay within 0.5 dB of it).
+/// 2. one Process run, as the app does it (`ResultWriter.process`): with
+///    `-selfTestApollo` a repair (Apollo installed first if needed), with
+///    `-selfTestNormalize` normalizing to `-selfTestTarget` LUFS (default
+///    −10) under a `-selfTestCeiling` dBTP ceiling (default −1), then stems
+///    with htdemucs (skip with `-selfTestSkipStems`; `-selfTestAcapella`
+///    keeps only vocals and the instrumental). The finished track is
+///    measured again with LoudnessKit and must land within ±0.2 LU of the
+///    target, or, when the plan was capped, on the ceiling (±0.1 dB; lossy
+///    output only has to stay within 0.5 dB of it).
 ///
-/// Stems and the repair are saved the way the app saves them
-/// (`ResultWriter`), as `-selfTestFormat` (aiff, wav, flac, mp3-320,
+/// Everything is saved as `-selfTestFormat` (aiff, wav, flac, mp3-320,
 /// mp3-256, mp3-192; default aiff); each output is decoded again and its
-/// rate, channels, length and tags reported.
+/// rate, channels, length and tags reported (the finished track's title
+/// must be the source's, unsuffixed).
 ///
 /// Point `-supportDirectory` somewhere disposable to keep models and the
 /// Apollo weights out of `~/Library/Application Support/DJTools`.
@@ -162,143 +161,88 @@ enum SelfTest {
             }
         }
 
-        // 2. Stems.
-        if !skipStems {
-            log("stems (htdemucs, \(format.rawValue))…")
-            let recorder = CallbackRecorder<Double>()
-            let statusLines = CallbackRecorder<String>()
+        // 2. Process: repair → normalize → stems in one run, as the app does.
+        let steps = ResultWriter.Steps(
+            repair: withApollo,
+            normalize: withNormalize ? target : nil,
+            stems: skipStems ? nil : (.htdemucs, LaunchArguments.flag("selfTestAcapella", in: arguments) == true ? .acapellaInstrumental : .all)
+        )
+        if !steps.isEmpty {
+            var step: [String: Any] = [
+                "repair": steps.repair, "normalize": withNormalize, "stems": !skipStems,
+            ]
             do {
-                let start = clock.now
-                let choice: DJStemChoice = LaunchArguments.flag("selfTestAcapella", in: arguments) == true ? .acapellaInstrumental : .all
-                let stems = try await ResultWriter.separate(
-                    input: input, model: .htdemucs, choice: choice,
-                    format: format, tags: await AudioTags.read(from: input), outputFolder: output, engine: engines.stems,
-                    progress: { recorder.record($0, every: 0.1) { log("stems \(Int($0 * 100))%") } },
-                    status: { statusLines.record($0, every: 0) { log("stems status: \($0)") } }
-                )
-                let elapsed = clock.now - start
-                var files: [String: Any] = [:]
-                var outputsOK = true
-                for (name, url) in stems.stems {
-                    let check = await checkOutput(url, format: format, expectedDuration: engines.isFake ? nil : track.quality?.duration,
-                                                  expectedTitleSuffix: " (\(name.capitalized))")
-                    files[name] = check.json
-                    outputsOK = outputsOK && check.ok
-                }
-                let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: output.path))?
-                    .filter { $0.hasPrefix(".") || $0.hasSuffix(".wav") && format != .wav } ?? []
-                let stepOK = outputsOK && leftovers.isEmpty && Set(stems.stems.keys) == Set(choice.outputs(for: .htdemucs))
-                ok = ok && stepOK
-                result["stems"] = [
-                    "ok": stepOK, "model": DJStemModel.htdemucs.modelName, "seconds": seconds(elapsed),
-                    "realtimeFactor": orNull(track.quality.map { $0.duration / max(seconds(elapsed), 0.001) }),
-                    "stems": files,
-                    "leftovers": leftovers,
-                    "progress": recorder.summary,
-                    "status": statusLines.summary,
-                    "processPeakRSSMB": peakRSSMB(children: false),
-                ] as [String: Any]
-                log("stems done in \(seconds(elapsed)) s")
-            } catch {
-                ok = false
-                result["stems"] = ["ok": false, "error": error.localizedDescription, "progress": recorder.summary]
-            }
-        }
-
-        // 3. Apollo.
-        if withApollo {
-            var apollo: [String: Any] = ["initialState": describe(await engines.apollo.state())]
-            do {
-                if await engines.apollo.state() != .ready {
+                if steps.repair, await engines.apollo.state() != .ready {
                     log("Apollo install…")
                     let lines = CallbackRecorder<String>()
                     let start = clock.now
                     try await engines.apollo.install { line in
                         lines.record(line, every: 0) { log("install: \($0)") }
                     }
-                    let elapsed = clock.now - start
-                    apollo["installSeconds"] = seconds(elapsed)
-                    apollo["installStatus"] = lines.summary
+                    step["installSeconds"] = seconds(clock.now - start)
+                    step["installStatus"] = lines.summary
                 }
-                apollo["stateAfterInstall"] = describe(await engines.apollo.state())
-
-                log("Apollo repair…")
+                log("process (\(format.rawValue))…")
                 let progress = CallbackRecorder<Double>()
                 let status = CallbackRecorder<String>()
                 let start = clock.now
-                let saved = try await ResultWriter.repair(
-                    input: input, format: format, tags: await AudioTags.read(from: input), outputFolder: output, engine: engines.apollo,
-                    normalize: withNormalize ? ResultWriter.NormalizeStep(target: target, meter: engines.loudness) : nil,
-                    progress: { progress.record($0, every: 0.1) { log("repair \(Int($0 * 100))%") } },
-                    status: { status.record($0, every: 0) { log("repair status: \($0)") } }
+                let tags = await AudioTags.read(from: input)
+                let processed = try await ResultWriter.process(
+                    input: input, steps: steps, format: format, tags: tags, outputFolder: output, engines: engines,
+                    progress: { progress.record($0, every: 0.1) { log("process \(Int($0 * 100))%") } },
+                    status: { status.record($0, every: 0) { log("process status: \($0)") } }
                 )
-                let written = saved.url
                 let elapsed = clock.now - start
-                let check = await checkOutput(written, format: format, expectedDuration: engines.isFake ? nil : track.quality?.duration,
-                                              expectedTitleSuffix: " (Repaired)")
-                apollo["check"] = check.json
-                var stepOK = check.ok
-                if let plan = saved.plan, let measured = saved.loudness {
-                    let landed = await verifyNormalized(written, plan: plan, source: measured, format: format, engines: engines)
-                    apollo["normalized"] = landed.json
-                    stepOK = stepOK && landed.ok
-                }
-                ok = ok && stepOK
-                apollo["ok"] = stepOK
-                apollo["repairSeconds"] = seconds(elapsed)
-                apollo["realtimeFactor"] = orNull(track.quality.map { $0.duration / max(seconds(elapsed), 0.001) })
-                apollo["output"] = written.path
-                apollo["outputBytes"] = orNull(fileSize(written))
-                apollo["progress"] = progress.summary
-                apollo["status"] = status.summary
-                apollo["processPeakRSSMB"] = peakRSSMB(children: false)
-                log("repair done in \(seconds(elapsed)) s")
-            } catch {
-                ok = false
-                apollo["ok"] = false
-                apollo["error"] = error.localizedDescription
-            }
-            result["apollo"] = apollo
-        }
+                let files = processed.files
+                let duration = engines.isFake ? nil : track.quality?.duration
+                var stepOK = true
 
-        // 4. Normalize.
-        if withNormalize {
-            log("normalize to \(target.lufs) LUFS, ceiling \(target.ceilingDBTP) dBTP (\(format.rawValue))…")
-            let progress = CallbackRecorder<Double>()
-            let status = CallbackRecorder<String>()
-            var step: [String: Any] = [:]
-            do {
-                let start = clock.now
-                let saved = try await ResultWriter.normalize(
-                    input: input, target: target, format: format, tags: await AudioTags.read(from: input), outputFolder: output, engine: engines.loudness,
-                    progress: { progress.record($0, every: 0.1) { log("normalize \(Int($0 * 100))%") } },
-                    status: { status.record($0, every: 0) { log("normalize status: \($0)") } }
-                )
-                let elapsed = clock.now - start
-                let check = await checkOutput(saved.url, format: format, expectedDuration: engines.isFake ? nil : track.quality?.duration,
-                                              expectedTitleSuffix: " (Normalized)")
-                step["check"] = check.json
+                if let written = files.output {
+                    // No suffix: the finished track keeps the source's title.
+                    let check = await checkOutput(written, format: format, expectedDuration: duration, expectedTitle: tags.title ?? input.deletingPathExtension().lastPathComponent)
+                    step["track"] = check.json
+                    stepOK = stepOK && check.ok
+                    if let plan = files.normalization, let measured = processed.loudness {
+                        let landed = await verifyNormalized(written, plan: plan, source: measured, format: format, engines: engines)
+                        step["loudness"] = landed.json
+                        stepOK = stepOK && landed.ok
+                    }
+                } else if steps.writesTrack {
+                    stepOK = false
+                    step["error"] = "no finished track"
+                }
+
+                if let stemsStep = steps.stems {
+                    var stemFiles: [String: Any] = [:]
+                    for (name, url) in files.stems ?? [:] {
+                        let check = await checkOutput(url, format: format, expectedDuration: duration,
+                                                      expectedTitleSuffix: " (\(name.capitalized))")
+                        stemFiles[name] = check.json
+                        stepOK = stepOK && check.ok
+                    }
+                    step["stemFiles"] = stemFiles
+                    stepOK = stepOK && Set((files.stems ?? [:]).keys) == Set(stemsStep.choice.outputs(for: stemsStep.model))
+                }
+                let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: output.path))?
+                    .filter { $0.hasPrefix(".") || $0.hasSuffix(".wav") && format != .wav } ?? []
+                stepOK = stepOK && leftovers.isEmpty
+                step["leftovers"] = leftovers
+                step["ok"] = stepOK
                 step["seconds"] = seconds(elapsed)
-                step["output"] = saved.url.path
+                step["realtimeFactor"] = orNull(track.quality.map { $0.duration / max(seconds(elapsed), 0.001) })
+                step["output"] = orNull(files.output?.path)
+                step["stemsFolder"] = orNull(files.stemsFolder?.path)
                 step["progress"] = progress.summary
                 step["status"] = status.summary
-                var stepOK = check.ok
-                if let plan = saved.plan, let measured = saved.loudness {
-                    let landed = await verifyNormalized(saved.url, plan: plan, source: measured, format: format, engines: engines)
-                    step["loudness"] = landed.json
-                    stepOK = stepOK && landed.ok
-                } else {
-                    stepOK = false
-                }
-                step["ok"] = stepOK
+                step["processPeakRSSMB"] = peakRSSMB(children: false)
                 ok = ok && stepOK
-                log("normalize done in \(seconds(elapsed)) s")
+                log("process done in \(seconds(elapsed)) s")
             } catch {
                 ok = false
                 step["ok"] = false
                 step["error"] = error.localizedDescription
             }
-            result["normalize"] = step
+            result["process"] = step
         }
 
         result["ok"] = ok
@@ -358,7 +302,7 @@ enum SelfTest {
     /// MP3, the source's length (± one MP3 frame; skipped for the fakes'
     /// one-second files), and the suffixed title where the format has tags.
     private static func checkOutput(_ url: URL, format: AudioFileFormat, expectedDuration: TimeInterval?,
-                                    expectedTitleSuffix: String) async -> (ok: Bool, json: [String: Any]) {
+                                    expectedTitleSuffix: String = "", expectedTitle: String? = nil) async -> (ok: Bool, json: [String: Any]) {
         var json: [String: Any] = ["path": url.path, "bytes": orNull(fileSize(url))]
         guard url.pathExtension == format.fileExtension else {
             json["error"] = "extension \(url.pathExtension), expected \(format.fileExtension)"
@@ -396,6 +340,8 @@ enum SelfTest {
                 json["album"] = orNull(tags.album)
                 json["artworkBytes"] = tags.artwork?.count ?? 0
                 ok = ok && (tags.title?.hasSuffix(expectedTitleSuffix) ?? false)
+                if let expectedTitle { ok = ok && tags.title == expectedTitle }
+                json["comment"] = orNull(tags.comment)
             }
         }
         json["ok"] = ok
