@@ -28,6 +28,16 @@ enum Credits {
             url: URL(string: "https://github.com/ssmall256/demucs-mlx-swift")!
         ),
         Credit(
+            name: "Beat This!", license: "MIT",
+            detail: "Beat tracking model and weights by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (CPJKU, JKU Linz; “Beat This! Accurate Beat Tracking Without DBN Postprocessing”, ISMIR 2024). DJ Tools runs its own MLX port for BPM.",
+            url: URL(string: "https://github.com/CPJKU/beat_this")!
+        ),
+        Credit(
+            name: "libkeyfinder", license: "GPL-3.0",
+            detail: "Musical key detection by Ibrahim Sha'ath, maintained by the Mixxx team. Ships in AnalysisKit with its FFTW calls replaced by Accelerate.",
+            url: URL(string: "https://github.com/mixxxdj/libkeyfinder")!
+        ),
+        Credit(
             name: "MLX", license: "MIT",
             detail: "Apple's array framework for Apple silicon (mlx, mlx-swift).",
             url: URL(string: "https://github.com/ml-explore/mlx-swift")!

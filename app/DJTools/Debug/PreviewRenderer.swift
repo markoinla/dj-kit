@@ -243,6 +243,11 @@ struct PreviewFixtures {
             }
             return track
         }
+        func analysis(_ bpm: Double, tonic: Int, minor: Bool, stability: Double = 0.004) -> DJMusicalAnalysis {
+            DJMusicalAnalysis(tempo: DJTempoEstimate(rawBPM: bpm, beatCount: 600, stability: stability),
+                              key: DJKeyEstimate(key: DJMusicalKey(tonic: tonic, isMinor: minor), margin: 0.12),
+                              duration: 300)
+        }
         func loudness(_ lufs: Double, peak: Double, duration: TimeInterval) -> DJLoudnessReport {
             DJLoudnessReport(integratedLUFS: lufs, truePeakDBTP: peak, samplePeakDBFS: peak - 0.2,
                              loudnessRangeLU: 6, duration: duration, sampleRate: 44_100, channels: 2)
@@ -252,6 +257,8 @@ struct PreviewFixtures {
         var fp = track("Floating Points - Silhouettes (I, II & III).flac", .lossless, bitrate: 1012, cutoff: 21_950,
                        duration: 653, size: 82_400_000, summary: "Full range up to 22 kHz — genuinely lossless")
         fp.loudness = loudness(-15.3, peak: -3.0, duration: 653)
+        // A tempo that drifts: "~".
+        fp.analysis = analysis(121.4, tonic: 3, minor: true, stability: 0.05)
         fp.identifiedAt = now
         let stemsFolder = output.appending(path: "\(fp.name) (Stems)", directoryHint: .isDirectory)
         fp.results = [
@@ -271,6 +278,9 @@ struct PreviewFixtures {
         var so = track("Overmono - So U Kno.mp3", .lowQuality, bitrate: 128, cutoff: 16_000, duration: 312,
                        size: 5_010_000, summary: "Cuts off at 16 kHz — likely a 128 kbps MP3")
         so.loudness = loudness(-7.9, peak: 0.2, duration: 312)
+        // The file's own tags disagree: "tag: 129 · 9A · Em" under the readout.
+        so.analysis = analysis(130, tonic: 9, minor: true)
+        so.fileTags = FileMusicalTags(AudioTags(genre: "Electronic", bpm: "129", key: "Em"))
         overmono = so
 
         // Waiting in line behind Bicep.
@@ -283,6 +293,7 @@ struct PreviewFixtures {
         var rff = track("Ross From Friends - Talk To Me You'll Understand.m4a", .goodLossy, bitrate: 256, cutoff: 19_500,
                         duration: 401, size: 12_800_000, summary: "Cuts off at 19.5 kHz — a good 256 kbps encode")
         rff.loudness = loudness(-6.2, peak: 0.4, duration: 401)
+        rff.analysis = analysis(61, tonic: 0, minor: true)
         rff.identifiedAt = now
         ross = rff
 
@@ -290,6 +301,8 @@ struct PreviewFixtures {
         var ktm = track("KTMA_IGB_master_v3.aiff", .lossless, bitrate: nil, cutoff: 21_900, duration: 384,
                         size: 67_800_000, summary: "Full range up to 22 kHz — genuinely lossless")
         ktm.loudness = loudness(-8.4, peak: -0.6, duration: 384)
+        ktm.analysis = analysis(126, tonic: 6, minor: true)
+        ktm.fileTags = FileMusicalTags(AudioTags())
         ktm.identity = DJTrackIdentity(title: "It Gets Better", artist: "Kettama", album: "It Gets Better",
                                        label: "Steel City Dance Discs", genre: "House", releaseDate: "2026-09-12",
                                        durationSeconds: 386, hits: 3, listens: 3)
@@ -300,12 +313,14 @@ struct PreviewFixtures {
         var glue = track("Bicep - Glue (Original Mix).mp3", .lowQuality, bitrate: 160, cutoff: 16_500, duration: 269,
                          size: 5_400_000, summary: "Cuts off at 16.5 kHz — likely a 160 kbps MP3")
         glue.identifiedAt = now
+        glue.analysis = analysis(129.98, tonic: 5, minor: true)
         bicep = glue
 
         // The last run failed.
         var archangel = track("Burial - Archangel (old rip).mp3", .lowQuality, bitrate: 64, cutoff: 11_000, duration: 238,
                               size: 1_900_000, summary: "MP3 64 kbps, cuts off at 11.0 kHz — low quality")
         archangel.identifiedAt = now
+        archangel.analysisError = "Can't read the audio: the file is damaged."
         burial = archangel
 
         // Just dropped: checked, Track ID listening.
@@ -329,18 +344,21 @@ struct PreviewFixtures {
     }
 
     /// Bicep repairing (stems next), Fred waiting, Burial's run failed,
-    /// Sammy's Track ID listening.
+    /// Sammy's Track ID listening and the tempo model downloading.
     var sessionJobs: [Job] {
         var running = job(bicep, process(repair: true, stems: true), .running, progress: 0.18)
         running.steps = [.repair, .normalize, .stems]
         running.currentStep = .repair
         running.stepProgress = 0.42
         running.statusText = "Repairing"
+        var downloading = job(sammy, .analyze, .running)
+        downloading.statusText = "Downloading model…"
         return [
             running,
             job(fred, process(repair: true), .queued),
             job(burial, process(repair: true), .failed("Repair stopped: out of memory.")),
             job(sammy, .identify, .running, progress: 0.4),
+            downloading,
         ]
     }
 

@@ -260,3 +260,58 @@ struct FakeTrackIdentifier: TrackIdentifying {
         )
     }
 }
+
+/// A deterministic BPM and key per file name after a second of counting up
+/// (118–131 BPM, raw values below 100 doubled by the folding; a name with
+/// "live" has an unsteady tempo). The first run "downloads the model" for a
+/// couple of seconds and leaves a marker in `<supportDirectory>/fake-engines/`.
+actor FakeMusicalAnalyzer: MusicalAnalyzing {
+    private let marker: URL
+    private let speed: Double
+
+    init(supportDirectory: URL, speed: Double = 1) {
+        marker = supportDirectory.appending(path: "fake-engines/beat-this-downloaded")
+        self.speed = speed
+    }
+
+    func analyze(
+        _ url: URL,
+        progress: @escaping @Sendable (Double) -> Void,
+        status: @escaping @Sendable (String) -> Void
+    ) async throws -> DJMusicalAnalysis {
+        if !FileManager.default.fileExists(atPath: marker.path) {
+            status("Downloading model…")
+            try await Task.sleep(for: .milliseconds(Int(2_000 / speed)))
+            try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("fake".utf8).write(to: marker)
+        }
+        status("Analyzing…")
+        let steps = 10
+        for step in 0...steps {
+            progress(Double(step) / Double(steps))
+            if step < steps { try await Task.sleep(for: .milliseconds(Int(100 / speed))) }
+        }
+        return Self.analysis(for: url)
+    }
+
+    static func analysis(for url: URL) -> DJMusicalAnalysis {
+        let hash = FakeHash.of(url.lastPathComponent)
+        let bpm = 118 + Double(hash % 14)
+        let live = url.lastPathComponent.lowercased().contains("live")
+        return DJMusicalAnalysis(
+            tempo: DJTempoEstimate(rawBPM: hash % 5 == 0 ? bpm / 2 : bpm, beatCount: Int(bpm * 5),
+                                   stability: live ? 0.06 : 0.004),
+            key: DJKeyEstimate(key: DJMusicalKey(tonic: Int((hash >> 8) % 12), isMinor: (hash >> 12) % 3 != 0),
+                               margin: Double((hash >> 16) % 100) / 400),
+            duration: 200 + Double(hash % 260)
+        )
+    }
+
+    func isPrepared() async -> Bool { FileManager.default.fileExists(atPath: marker.path) }
+
+    func removeModel() async throws {
+        if FileManager.default.fileExists(atPath: marker.path) {
+            try FileManager.default.removeItem(at: marker)
+        }
+    }
+}
