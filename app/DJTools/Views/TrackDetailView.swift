@@ -88,14 +88,14 @@ struct TrackDetailContent: View {
                 ToolCard(
                     systemImage: "wand.and.stars",
                     title: "Repair with Apollo",
-                    message: "Rebuilds the high end that lossy encoding cut off and writes a new file. The original stays as it is. Takes about as long as the track: a 4-minute track is about 4 minutes on an M-series MacBook Air.",
+                    message: "Rebuilds the high end that lossy encoding cut off and writes a new file. The original stays as it is. Takes about a third of the track's length on an M-series Air (a 4-minute track ≈ 1½ minutes).",
                     jobs: tracks.compactMap { model.job(for: $0.id, kind: .repair) },
                     multi: tracks.count > 1,
                     suggestion: suggestion(tracks: tracks, lowCount: lowCount)
                 ) {
                     VStack(alignment: .leading, spacing: 6) {
                         if model.apolloState != .ready {
-                            Label("First use downloads the repair engine, about 600 MB.", systemImage: "arrow.down.circle")
+                            Label("First use downloads the repair model, about 66 MB.", systemImage: "arrow.down.circle")
                                 .djText(.caption)
                                 .foregroundStyle(DJColor.mutedForeground)
                                 .fixedSize(horizontal: false, vertical: true)

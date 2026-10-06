@@ -56,12 +56,12 @@ struct SettingsView: View {
                         .foregroundStyle(DJColor.marker)
                 }
                 LabeledContent("Status", value: apolloStatus)
-                Button("Reset Apollo Runtime…", role: .destructive) { isConfirmingReset = true }
+                Button("Remove Apollo Model…", role: .destructive) { isConfirmingReset = true }
                     .disabled(isResetting || model.apolloState == .notInstalled || model.apolloState.isInstalling)
             } header: {
                 Text("Apollo")
             } footer: {
-                Text("Removes the downloaded runtime and model from Application Support. The next repair downloads them again.")
+                Text("Removes the downloaded model (about 66 MB) from Application Support. The next repair downloads it again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -93,8 +93,8 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
-        .confirmationDialog("Reset Apollo's runtime?", isPresented: $isConfirmingReset) {
-            Button("Reset", role: .destructive) {
+        .confirmationDialog("Remove Apollo's model?", isPresented: $isConfirmingReset) {
+            Button("Remove", role: .destructive) {
                 isResetting = true
                 Task {
                     await model.resetApollo()
@@ -102,7 +102,7 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("Running repairs stop, and the next one downloads about 600 MB again.")
+            Text("Running repairs stop, and the next one downloads about 66 MB again.")
         }
         .task { await model.refreshApolloState() }
     }
@@ -127,7 +127,7 @@ struct SettingsView: View {
     }
 
     private var apolloStatus: String {
-        if isResetting { return "Resetting…" }
+        if isResetting { return "Removing…" }
         switch model.apolloState {
         case .notInstalled: return "Not installed"
         case .installing(let line): return line

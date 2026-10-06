@@ -1,5 +1,6 @@
-import ApolloBridge
+import ApolloMLX
 import Foundation
+import os
 import QualityKit
 import StemsKit
 
@@ -61,27 +62,43 @@ actor StemsKitAdapter: StemSeparating {
     }
 }
 
-/// `ApolloBridge.ApolloRuntime`. `reset()` deletes `<supportDirectory>/runtime/`.
-struct ApolloBridgeAdapter: ApolloRepairing {
-    let runtime: ApolloRuntime
-    let supportDirectory: URL
+/// `ApolloMLX.ApolloMLXRepairer`: the native MLX port of Apollo, no Python.
+///
+/// Setup is `prepare()` (download the pinned 66 MB checkpoint from Hugging
+/// Face, SHA-check it and convert it to `apollo-mlx.safetensors` in Swift);
+/// "installed" is the converted weights being there. Repairs run at fp16.
+/// The package reports only progress, so the status lines are made up here:
+/// "Loading model" until the first chunk, "Repairing", then "Writing output".
+/// `reset()` deletes the weights.
+actor ApolloMLXAdapter: ApolloRepairing {
+    private let repairer: ApolloMLXRepairer
+    private var installLine: String?
+    private var current: Task<URL, any Error>?
 
-    init(projectDirectory: URL, supportDirectory: URL) {
-        runtime = ApolloRuntime(projectDirectory: projectDirectory, supportDirectory: supportDirectory)
-        self.supportDirectory = supportDirectory
+    /// Weights go in `<supportDirectory>/models/apollo-mlx/`.
+    init(supportDirectory: URL) {
+        repairer = ApolloMLXRepairer(
+            modelsDirectory: supportDirectory.appending(path: "models/apollo-mlx", directoryHint: .isDirectory)
+        )
     }
 
     func state() async -> DJApolloSetupState {
-        switch await runtime.state() {
-        case .notInstalled: .notInstalled
-        case .installing(let line): .installing(line)
-        case .ready: .ready
-        case .failed(let message): .failed(message)
-        }
+        if let installLine { return .installing(installLine) }
+        return await repairer.isPrepared ? .ready : .notInstalled
     }
 
     func install(progress: @escaping @Sendable (String) -> Void) async throws {
-        try await runtime.install(progress: MainHop.wrap(progress))
+        installLine = "Starting…"
+        defer { installLine = nil }
+        let onMain = MainHop.wrap(progress)
+        try await repairer.prepare { [weak self] line in
+            Task { await self?.setInstallLine(line) }
+            onMain(line)
+        }
+    }
+
+    private func setInstallLine(_ line: String) {
+        if installLine != nil { installLine = line }
     }
 
     func repair(
@@ -89,26 +106,39 @@ struct ApolloBridgeAdapter: ApolloRepairing {
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
     ) async throws -> URL {
-        try await withTaskCancellationHandler {
-            try await runtime.repair(
-                input: input, output: output,
-                progress: MainHop.wrap(progress), status: MainHop.wrap(status)
-            )
+        let onProgress = MainHop.wrap(progress), onStatus = MainHop.wrap(status)
+        let phase = OSAllocatedUnfairLock(initialState: 0)  // 0 loading, 1 repairing, 2 writing
+        let repairer = self.repairer
+        onStatus("Loading model")
+        let task = Task {
+            try await repairer.repair(input: input, output: output) { fraction in
+                let next = fraction >= 1 ? 2 : 1
+                let changed = phase.withLock { current in
+                    guard next > current else { return false }
+                    current = next
+                    return true
+                }
+                if changed { onStatus(next == 2 ? "Writing output" : "Repairing") }
+                onProgress(fraction)
+            }
+        }
+        current?.cancel()
+        current = task
+        defer { if current == task { current = nil } }
+        return try await withTaskCancellationHandler {
+            try await task.value
         } onCancel: {
-            // The runtime waits on a subprocess; cancelling the task alone wouldn't stop it.
-            Task { await runtime.cancel() }
+            task.cancel()
         }
     }
 
     func cancel() async {
-        await runtime.cancel()
+        current?.cancel()
+        current = nil
     }
 
     func reset() async throws {
-        await runtime.cancel()
-        let runtimeDirectory = supportDirectory.appending(path: "runtime", directoryHint: .isDirectory)
-        if FileManager.default.fileExists(atPath: runtimeDirectory.path) {
-            try FileManager.default.removeItem(at: runtimeDirectory)
-        }
+        await cancel()
+        try await repairer.removeWeights()
     }
 }

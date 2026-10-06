@@ -38,7 +38,7 @@ struct ApolloSetupContent: View {
                         .font(.dj(17, weight: 650))
                         .tracking(-0.2)
                         .foregroundStyle(DJColor.foreground)
-                    Text("Apollo runs on this Mac, so it needs a one-time download of about 600 MB. Setup takes from about 15 seconds to a few minutes, depending on your connection. After that, repairs work offline.")
+                    Text("Apollo runs on this Mac, so it needs a one-time download of about 66 MB. Setup takes a few seconds on a fast connection. After that, repairs work offline.")
                         .djText(.body)
                         .foregroundStyle(DJColor.mutedForeground)
                         .fixedSize(horizontal: false, vertical: true)
@@ -46,11 +46,11 @@ struct ApolloSetupContent: View {
             }
 
             VStack(spacing: 0) {
-                item("shippingbox", "Python runtime and PyTorch", "Installed privately for DJ Tools — no Homebrew, no admin password.")
+                item("cpu", "Apollo model weights", "From Hugging Face (JusperLee/Apollo), CC BY-SA 4.0. Checked and converted for Apple silicon on this Mac.")
                 DJDivider()
-                item("cpu", "Apollo model weights", "From Hugging Face (JusperLee/Apollo), CC BY-SA 4.0. A repair takes about as long as the track plays.")
+                item("bolt", "Runs natively on the GPU", "A repair takes about a third of the track's length on an M-series Air (a 4-minute track ≈ 1½ minutes).")
                 DJDivider()
-                item("internaldrive", "Kept in Application Support", "~/Library/Application Support/DJTools. Settings ▸ Reset Apollo Runtime removes it.")
+                item("internaldrive", "Kept in Application Support", "~/Library/Application Support/DJTools. Settings ▸ Remove Apollo Model deletes it.")
             }
             .djCard()
 

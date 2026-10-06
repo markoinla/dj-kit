@@ -372,7 +372,7 @@ final class AppModel {
         if !apolloState.isInstalling || !state.isInstalling { apolloState = state }
     }
 
-    /// The setup sheet's Install: downloads the runtime, then runs the
+    /// The setup sheet's Install: downloads the model, then runs the
     /// repairs that were waiting for it and closes the sheet.
     func installApollo() {
         guard !apolloState.isInstalling else { return }
@@ -400,7 +400,7 @@ final class AppModel {
         }
     }
 
-    /// Settings ▸ Reset Apollo Runtime: stops repairs and removes the runtime.
+    /// Settings ▸ Remove Apollo Model: stops repairs and deletes the weights.
     func resetApollo() async {
         for job in jobs where job.kind == .repair && job.state.isActive { cancel(job.id) }
         do {

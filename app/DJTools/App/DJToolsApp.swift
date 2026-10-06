@@ -9,6 +9,10 @@ import SwiftUI
 @MainActor
 enum DJToolsMain {
     static func main() {
+        // Before anything touches MLX (StemsKit included): plain fp32 matmuls,
+        // not TF32. ApolloMLX's parity with PyTorch was verified this way, and
+        // Apollo's per-band normalisation amplifies TF32's rounding.
+        setenv("MLX_ENABLE_TF32", "0", 1)
         #if DEBUG
         if let directory = LaunchArguments.value("renderPreviews") {
             DJFont.register()

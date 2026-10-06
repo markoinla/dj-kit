@@ -14,7 +14,7 @@ enum Credits {
     static let all: [Credit] = [
         Credit(
             name: "Apollo", license: "CC BY-SA 4.0",
-            detail: "Repair model and weights by Kai Li and Yi Luo (“Apollo: Band-sequence Modeling for High-Quality Audio Restoration”, ICASSP 2025). Adapted inference code ships under the same license.",
+            detail: "Repair model and weights by Kai Li and Yi Luo (“Apollo: Band-sequence Modeling for High-Quality Audio Restoration”, ICASSP 2025). DJ Tools runs its own MLX port of the inference code (ApolloMLX), shared under the same license.",
             url: URL(string: "https://github.com/JusperLee/Apollo")!
         ),
         Credit(
