@@ -1,4 +1,5 @@
 import AppKit
+import AudioExport
 import SwiftUI
 
 /// The detail pane for the sidebar's selection: one track, or several.
@@ -19,6 +20,9 @@ struct TrackDetailContent: View {
     let ids: [Track.ID]
     /// The picker's choice; Settings' default until changed.
     @State private var stemModel: DJStemModel?
+    /// The format menus' choices for this job; Settings' defaults until changed.
+    @State private var stemsFormat: AudioFileFormat?
+    @State private var repairFormat: AudioFileFormat?
 
     var body: some View {
         let tracks = ids.compactMap(model.track)
@@ -46,6 +50,8 @@ struct TrackDetailContent: View {
     private func toolsSection(_ tracks: [Track]) -> some View {
         let ids = tracks.map(\.id)
         let chosen = stemModel ?? model.settings.defaultStemModel
+        let stemsAs = stemsFormat ?? model.settings.stemsFormat
+        let repairAs = repairFormat ?? model.settings.repairFormat
         let lowCount = tracks.filter(\.needsRepair).count
         return VStack(alignment: .leading, spacing: DJSpace.sm) {
             DJSectionHeader("Tools", detail: tracks.count > 1 ? "Runs on all \(tracks.count) selected" : nil)
@@ -53,7 +59,7 @@ struct TrackDetailContent: View {
                 ToolCard(
                     systemImage: "square.3.layers.3d",
                     title: "Separate Stems",
-                    message: "Writes each stem as a WAV in a “(Stems)” folder. A few minutes a track.",
+                    message: "Writes each stem to a “(Stems)” folder. A few minutes a track.",
                     jobs: tracks.compactMap { model.job(for: $0.id, kind: .stems(chosen)) },
                     multi: tracks.count > 1
                 ) {
@@ -67,18 +73,22 @@ struct TrackDetailContent: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } action: {
-                    Button(tracks.count > 1 ? "Separate \(tracks.count) Tracks" : "Separate Stems", systemImage: "play.fill") {
-                        model.separateStems(ids, model: chosen)
+                    VStack(spacing: 6) {
+                        Button(tracks.count > 1 ? "Separate \(tracks.count) Tracks" : "Separate Stems", systemImage: "play.fill") {
+                            model.separateStems(ids, model: chosen, format: stemsAs)
+                        }
+                        // The suggested repair gets the strong button.
+                        .buttonStyle(.dj(lowCount > 0 ? .outline : .primary, fullWidth: true))
+                        .disabled(allBusy(ids, kind: .stems(chosen)))
+                        FormatMenu(selection: Binding(get: { stemsAs }, set: { stemsFormat = $0 }),
+                                   defaultFormat: model.settings.stemsFormat)
                     }
-                    // The suggested repair gets the strong button.
-                    .buttonStyle(.dj(lowCount > 0 ? .outline : .primary, fullWidth: true))
-                    .disabled(allBusy(ids, kind: .stems(chosen)))
                 }
 
                 ToolCard(
                     systemImage: "wand.and.stars",
                     title: "Repair with Apollo",
-                    message: "Rebuilds the high end that lossy encoding cut off and writes a new WAV. The original stays as it is. Takes about as long as the track: a 4-minute track is about 4 minutes on an M-series MacBook Air.",
+                    message: "Rebuilds the high end that lossy encoding cut off and writes a new file. The original stays as it is. Takes about as long as the track: a 4-minute track is about 4 minutes on an M-series MacBook Air.",
                     jobs: tracks.compactMap { model.job(for: $0.id, kind: .repair) },
                     multi: tracks.count > 1,
                     suggestion: suggestion(tracks: tracks, lowCount: lowCount)
@@ -96,15 +106,22 @@ struct TrackDetailContent: View {
                                 .foregroundStyle(DJColor.mutedForeground)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if !repairAs.isLossless {
+                            MP3RepairHint()
+                        }
                     }
                 } action: {
-                    Button(repairTitle(tracks: tracks, lowCount: lowCount), systemImage: "wand.and.stars") {
-                        // Several selected: repair the ones that need it, or all if none do.
-                        let targets = lowCount > 0 && tracks.count > 1 ? tracks.filter(\.needsRepair).map(\.id) : ids
-                        model.repair(targets)
+                    VStack(spacing: 6) {
+                        Button(repairTitle(tracks: tracks, lowCount: lowCount), systemImage: "wand.and.stars") {
+                            // Several selected: repair the ones that need it, or all if none do.
+                            let targets = lowCount > 0 && tracks.count > 1 ? tracks.filter(\.needsRepair).map(\.id) : ids
+                            model.repair(targets, format: repairAs)
+                        }
+                        .buttonStyle(.dj(lowCount > 0 ? .accent : .outline, fullWidth: true))
+                        .disabled(allBusy(ids, kind: .repair))
+                        FormatMenu(selection: Binding(get: { repairAs }, set: { repairFormat = $0 }),
+                                   defaultFormat: model.settings.repairFormat)
                     }
-                    .buttonStyle(.dj(lowCount > 0 ? .accent : .outline, fullWidth: true))
-                    .disabled(allBusy(ids, kind: .repair))
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -525,6 +542,64 @@ private struct ToolCard<Options: View, Action: View>: View {
             .padding(DJSpace.sm)
             .background(DJColor.muted.opacity(0.5), in: RoundedRectangle(cornerRadius: DJRadius.lg))
         }
+    }
+}
+
+/// "Save as AIFF ⌄" under a tool's button: this job's file type, Settings'
+/// default until changed.
+struct FormatMenu: View {
+    @Binding var selection: AudioFileFormat
+    let defaultFormat: AudioFileFormat
+
+    var body: some View {
+        HStack(spacing: -4) {
+            Text("Save as")
+                .djText(.caption)
+                .foregroundStyle(DJColor.mutedForeground)
+            Menu {
+                Picker("Lossless", selection: $selection) {
+                    ForEach(AudioFileFormat.allCases.filter(\.isLossless)) { item($0) }
+                }
+                .pickerStyle(.inline)
+                Picker("MP3", selection: $selection) {
+                    ForEach(AudioFileFormat.allCases.filter { !$0.isLossless }) { item($0) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(selection.shortTitle)
+                        .font(.dj(12, weight: 600))
+                        .foregroundStyle(DJColor.foreground)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(DJColor.mutedForeground)
+                }
+                .frame(minHeight: 20)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.dj(.ghost, size: .small))
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("The file type for this job. The default is in Settings.")
+            .accessibilityLabel("Save as \(selection.title)")
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func item(_ format: AudioFileFormat) -> some View {
+        Text(format == defaultFormat ? "\(format.title) (default)" : format.title).tag(format)
+    }
+}
+
+/// Repair saved as MP3: the encoder cuts off the very highs Apollo rebuilt.
+struct MP3RepairHint: View {
+    var body: some View {
+        Label("MP3 cuts the highs Apollo just rebuilt (even 320 kbps stops around 20 kHz). Lossless is recommended.",
+              systemImage: "exclamationmark.triangle")
+            .djText(.caption)
+            .foregroundStyle(DJColor.marker)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

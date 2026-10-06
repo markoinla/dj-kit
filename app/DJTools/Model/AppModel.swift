@@ -1,3 +1,4 @@
+import AudioExport
 import Foundation
 import Observation
 
@@ -44,8 +45,9 @@ final class AppModel {
     /// The heavy job whose task is still running (it may already read as
     /// cancelled while its engine winds down).
     @ObservationIgnored private var heavyInFlight: Job.ID?
-    /// Repairs waiting for Apollo's setup to finish.
+    /// Repairs waiting for Apollo's setup to finish, and the file type they asked for.
     @ObservationIgnored private var pendingRepairs: [Track.ID] = []
+    @ObservationIgnored private var pendingRepairFormat: AudioFileFormat?
 
     init(engines: Engines, settings: AppSettings, store: LibraryStore?) {
         self.engines = engines
@@ -146,23 +148,29 @@ final class AppModel {
         }
     }
 
-    func separateStems(_ ids: [Track.ID], model: DJStemModel) {
-        for id in ids { enqueue(.stems(model), for: id) }
+    /// Separates stems, saved as `format` (Settings' choice when nil).
+    func separateStems(_ ids: [Track.ID], model: DJStemModel, format: AudioFileFormat? = nil) {
+        let format = format ?? settings.stemsFormat
+        for id in ids { enqueue(.stems(model), for: id, format: format) }
         if !ids.isEmpty { isShowingJobs = true }
     }
 
-    /// Repairs with Apollo, or first asks to set it up.
-    func repair(_ ids: [Track.ID]) {
+    /// Repairs with Apollo, saved as `format` (Settings' choice when nil), or
+    /// first asks to set Apollo up.
+    func repair(_ ids: [Track.ID], format: AudioFileFormat? = nil) {
         guard !ids.isEmpty else { return }
+        let format = format ?? settings.repairFormat
         switch apolloState {
         case .ready:
-            for id in ids { enqueue(.repair, for: id) }
+            for id in ids { enqueue(.repair, for: id, format: format) }
             isShowingJobs = true
         case .installing:
             pendingRepairs.append(contentsOf: ids.filter { !pendingRepairs.contains($0) })
+            pendingRepairFormat = format
             apolloSetup = ApolloSetupRequest(trackIDs: pendingRepairs)
         case .notInstalled, .failed:
             pendingRepairs = ids
+            pendingRepairFormat = format
             apolloSetup = ApolloSetupRequest(trackIDs: ids)
         }
     }
@@ -221,19 +229,19 @@ final class AppModel {
         guard let job = jobs.first(where: { $0.id == id }) else { return }
         jobs.removeAll { $0.id == id }
         switch job.kind {
-        case .repair: repair([job.trackID])
+        case .repair: repair([job.trackID], format: job.format)
         case .quality: checkQuality([job.trackID])
-        case .stems: enqueue(job.kind, for: job.trackID)
+        case .stems: enqueue(job.kind, for: job.trackID, format: job.format)
         }
     }
 
-    private func enqueue(_ kind: Job.Kind, for trackID: Track.ID) {
+    private func enqueue(_ kind: Job.Kind, for trackID: Track.ID, format: AudioFileFormat? = nil) {
         guard let track = track(trackID) else { return }
         // Once per tool per track at a time.
         if jobs.contains(where: { $0.trackID == trackID && $0.kind.sameTool(as: kind) && $0.state.isActive }) { return }
         // Drop older finished runs of the same tool for this track.
         jobs.removeAll { $0.trackID == trackID && $0.kind.sameTool(as: kind) && !$0.state.isActive }
-        jobs.append(Job(trackID: trackID, trackName: track.name, kind: kind))
+        jobs.append(Job(trackID: trackID, trackName: track.name, kind: kind, format: format))
         pump()
     }
 
@@ -292,6 +300,9 @@ final class AppModel {
         let progress: @Sendable (Double) -> Void = { [weak self] fraction in
             Task { @MainActor in self?.setProgress(job.id, fraction) }
         }
+        let status: @Sendable (String) -> Void = { [weak self] line in
+            Task { @MainActor in self?.setStatus(job.id, line) }
+        }
         do {
             guard track.fileExists else { throw AppError("Can't find the file. It may have moved.") }
             switch job.kind {
@@ -303,8 +314,9 @@ final class AppModel {
 
             case .stems(let model):
                 let output = try outputFolder()
-                let result = try await engines.stems.separate(
-                    input: track.url, model: model, outputDirectory: output, progress: progress
+                let result = try await ResultWriter.separate(
+                    input: track.url, model: model, format: job.format ?? settings.stemsFormat,
+                    outputFolder: output, engine: engines.stems, progress: progress, status: status
                 )
                 guard isRunning(job.id) else { return }
                 let folder = result.stems.values.first?.deletingLastPathComponent()
@@ -315,12 +327,9 @@ final class AppModel {
                 finish(job.id, .finished, result: folder)
 
             case .repair:
-                let output = Self.unique(try outputFolder().appending(path: "\(track.name) (Apollo).wav"))
-                let status: @Sendable (String) -> Void = { [weak self] line in
-                    Task { @MainActor in self?.setStatus(job.id, line) }
-                }
-                let written = try await engines.apollo.repair(
-                    input: track.url, output: output, progress: progress, status: status
+                let written = try await ResultWriter.repair(
+                    input: track.url, format: job.format ?? settings.repairFormat,
+                    outputFolder: try outputFolder(), engine: engines.apollo, progress: progress, status: status
                 )
                 guard isRunning(job.id) else { return }
                 updateTrack(track.id) { $0.results.append(TrackResult(kind: .repaired(output: written))) }
@@ -342,7 +351,7 @@ final class AppModel {
         return folder
     }
 
-    /// `name.wav`, or `name 2.wav`, `name 3.wav`… when taken.
+    /// `name.aiff`, or `name 2.aiff`, `name 3.aiff`… when taken.
     nonisolated static func unique(_ url: URL) -> URL {
         guard FileManager.default.fileExists(atPath: url.path) else { return url }
         let base = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
@@ -383,10 +392,11 @@ final class AppModel {
                 return
             }
             guard apolloState == .ready else { return }
-            let waiting = pendingRepairs
+            let waiting = pendingRepairs, format = pendingRepairFormat
             pendingRepairs = []
+            pendingRepairFormat = nil
             apolloSetup = nil
-            repair(waiting.filter { track($0) != nil })
+            repair(waiting.filter { track($0) != nil }, format: format)
         }
     }
 

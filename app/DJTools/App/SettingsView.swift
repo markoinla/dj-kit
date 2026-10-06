@@ -1,7 +1,8 @@
 import AppKit
+import AudioExport
 import SwiftUI
 
-/// Settings (⌘,): where results go, the default stem model, and Apollo.
+/// Settings (⌘,): where results go and as what, the default stem model, and Apollo.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var isConfirmingReset = false
@@ -29,7 +30,7 @@ struct SettingsView: View {
             } header: {
                 Text("Results")
             } footer: {
-                Text("Stems go in a “(Stems)” folder per track; Apollo writes “<track> (Apollo).wav”.")
+                Text("Stems go in a “(Stems)” folder per track; Apollo writes “<track> (Apollo).\(settings.repairFormat.fileExtension)”. AIFF, FLAC and MP3 carry the track's title, artist, album and artwork.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -43,9 +44,17 @@ struct SettingsView: View {
                 Text(settings.defaultStemModel.helper)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                FormatPicker(title: "Save stems as", selection: $settings.stemsFormat)
             }
 
             Section {
+                FormatPicker(title: "Save repairs as", selection: $settings.repairFormat)
+                if !settings.repairFormat.isLossless {
+                    Label("MP3 cuts the highs Apollo just rebuilt (even 320 kbps stops around 20 kHz). Lossless is recommended.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(DJColor.marker)
+                }
                 LabeledContent("Status", value: apolloStatus)
                 Button("Reset Apollo Runtime…", role: .destructive) { isConfirmingReset = true }
                     .disabled(isResetting || model.apolloState == .notInstalled || model.apolloState.isInstalling)
@@ -96,6 +105,25 @@ struct SettingsView: View {
             Text("Running repairs stop, and the next one downloads about 600 MB again.")
         }
         .task { await model.refreshApolloState() }
+    }
+
+    /// A file-type picker: lossless first, then the MP3 bitrates.
+    private struct FormatPicker: View {
+        let title: String
+        @Binding var selection: AudioFileFormat
+
+        var body: some View {
+            Picker(title, selection: $selection) {
+                Section("Lossless") {
+                    ForEach(AudioFileFormat.allCases.filter(\.isLossless)) { format in
+                        Text(format == .aiff ? "AIFF — best for Rekordbox" : format.title).tag(format)
+                    }
+                }
+                Section("Lossy") {
+                    ForEach(AudioFileFormat.allCases.filter { !$0.isLossless }) { Text($0.title).tag($0) }
+                }
+            }
+        }
     }
 
     private var apolloStatus: String {

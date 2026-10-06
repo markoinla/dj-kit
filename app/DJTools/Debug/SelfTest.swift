@@ -1,6 +1,8 @@
+import AVFoundation
+import AudioExport
 import Foundation
 
-/// `DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-supportDirectory <dir>]`
+/// `DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestFormat <format>] [-supportDirectory <dir>]`
 ///
 /// Runs the app's own engine adapters (the same `Engines` the window uses,
 /// not the packages directly) on one file, headless, then prints one JSON
@@ -11,6 +13,11 @@ import Foundation
 /// 1. quality check;
 /// 2. stems with htdemucs (skip with `-selfTestSkipStems`);
 /// 3. with `-selfTestApollo`: Apollo install if needed, then a repair.
+///
+/// Stems and the repair are saved the way the app saves them
+/// (`ResultWriter`), as `-selfTestFormat` (aiff, wav, flac, mp3-320,
+/// mp3-256, mp3-192; default aiff); each output is decoded again and its
+/// rate, channels, length and tags reported.
 ///
 /// Point `-supportDirectory` somewhere disposable to keep models and the
 /// Apollo runtime out of `~/Library/Application Support/DJTools`.
@@ -24,7 +31,7 @@ enum SelfTest {
 
     static func start(_ arguments: [String] = CommandLine.arguments) {
         guard let index = arguments.firstIndex(of: "-selfTest"), arguments.indices.contains(index + 2) else {
-            FileHandle.standardError.write(Data("usage: DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-supportDirectory <dir>]\n".utf8))
+            FileHandle.standardError.write(Data("usage: DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestFormat aiff|wav|flac|mp3-320|mp3-256|mp3-192] [-supportDirectory <dir>]\n".utf8))
             exit(64)
         }
         let input = absolute(arguments[index + 1], directory: false)
@@ -48,11 +55,17 @@ enum SelfTest {
         let engines = Engines.forLaunch(supportDirectory: support, arguments: arguments)
         let withApollo = LaunchArguments.flag("selfTestApollo", in: arguments) == true
         let skipStems = LaunchArguments.flag("selfTestSkipStems", in: arguments) == true
+        let formatName = LaunchArguments.value("selfTestFormat", in: arguments) ?? AudioFileFormat.aiff.rawValue
+        guard let format = AudioFileFormat(rawValue: formatName) else {
+            emit(["ok": false, "error": "Unknown -selfTestFormat \(formatName)"])
+            return false
+        }
         var result: [String: Any] = [
             "input": input.path,
             "outputDirectory": output.path,
             "supportDirectory": support.path,
             "engines": engines.isFake ? "fake" : "real",
+            "format": format.rawValue,
             "apolloProject": orNull(Bundle.main.url(forResource: "apollo", withExtension: nil)?.path),
             "physicalMemoryGB": Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824,
         ]
@@ -96,26 +109,36 @@ enum SelfTest {
 
         // 2. Stems.
         if !skipStems {
-            log("stems (htdemucs)…")
+            log("stems (htdemucs, \(format.rawValue))…")
             let recorder = CallbackRecorder<Double>()
+            let statusLines = CallbackRecorder<String>()
             do {
                 let start = clock.now
-                let stems = try await engines.stems.separate(
-                    input: input, model: .htdemucs, outputDirectory: output,
-                    progress: { recorder.record($0, every: 0.1) { log("stems \(Int($0 * 100))%") } }
+                let stems = try await ResultWriter.separate(
+                    input: input, model: .htdemucs, format: format, outputFolder: output, engine: engines.stems,
+                    progress: { recorder.record($0, every: 0.1) { log("stems \(Int($0 * 100))%") } },
+                    status: { statusLines.record($0, every: 0) { log("stems status: \($0)") } }
                 )
                 let elapsed = clock.now - start
-                let files = stems.stems.mapValues { url -> [String: Any] in
-                    ["path": url.path, "bytes": orNull(fileSize(url))]
+                var files: [String: Any] = [:]
+                var outputsOK = true
+                for (name, url) in stems.stems {
+                    let check = await checkOutput(url, format: format, expectedDuration: engines.isFake ? nil : track.quality?.duration,
+                                                  expectedTitleSuffix: " (\(name.capitalized))")
+                    files[name] = check.json
+                    outputsOK = outputsOK && check.ok
                 }
-                let missing = stems.stems.values.filter { fileSize($0) == nil }
-                let stepOK = missing.isEmpty && Set(stems.stems.keys) == Set(DJStemModel.htdemucs.stemNames)
+                let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: output.path))?
+                    .filter { $0.hasPrefix(".") || $0.hasSuffix(".wav") && format != .wav } ?? []
+                let stepOK = outputsOK && leftovers.isEmpty && Set(stems.stems.keys) == Set(DJStemModel.htdemucs.stemNames)
                 ok = ok && stepOK
                 result["stems"] = [
                     "ok": stepOK, "model": DJStemModel.htdemucs.modelName, "seconds": seconds(elapsed),
                     "realtimeFactor": orNull(track.quality.map { $0.duration / max(seconds(elapsed), 0.001) }),
                     "stems": files,
+                    "leftovers": leftovers,
                     "progress": recorder.summary,
+                    "status": statusLines.summary,
                     "processPeakRSSMB": peakRSSMB(children: false),
                 ] as [String: Any]
                 log("stems done in \(seconds(elapsed)) s")
@@ -143,17 +166,19 @@ enum SelfTest {
                 apollo["stateAfterInstall"] = describe(await engines.apollo.state())
 
                 log("Apollo repair…")
-                let target = AppModel.unique(output.appending(path: "\(track.name) (Apollo).wav"))
                 let progress = CallbackRecorder<Double>()
                 let status = CallbackRecorder<String>()
                 let start = clock.now
-                let written = try await engines.apollo.repair(
-                    input: input, output: target,
+                let written = try await ResultWriter.repair(
+                    input: input, format: format, outputFolder: output, engine: engines.apollo,
                     progress: { progress.record($0, every: 0.1) { log("repair \(Int($0 * 100))%") } },
                     status: { status.record($0, every: 0) { log("repair status: \($0)") } }
                 )
                 let elapsed = clock.now - start
-                let stepOK = fileSize(written) != nil
+                let check = await checkOutput(written, format: format, expectedDuration: engines.isFake ? nil : track.quality?.duration,
+                                              expectedTitleSuffix: " (Repaired)")
+                apollo["check"] = check.json
+                let stepOK = check.ok
                 ok = ok && stepOK
                 apollo["ok"] = stepOK
                 apollo["repairSeconds"] = seconds(elapsed)
@@ -175,6 +200,54 @@ enum SelfTest {
         result["ok"] = ok
         emit(result)
         return ok
+    }
+
+    /// Decodes a saved result again: right extension, decodable, 44.1 kHz for
+    /// MP3, the source's length (± one MP3 frame; skipped for the fakes'
+    /// one-second files), and the suffixed title where the format has tags.
+    private static func checkOutput(_ url: URL, format: AudioFileFormat, expectedDuration: TimeInterval?,
+                                    expectedTitleSuffix: String) async -> (ok: Bool, json: [String: Any]) {
+        var json: [String: Any] = ["path": url.path, "bytes": orNull(fileSize(url))]
+        guard url.pathExtension == format.fileExtension else {
+            json["error"] = "extension \(url.pathExtension), expected \(format.fileExtension)"
+            return (false, json)
+        }
+        let file: AVAudioFile
+        do {
+            file = try AVAudioFile(forReading: url)
+        } catch {
+            json["error"] = "doesn't decode: \(error.localizedDescription)"
+            return (false, json)
+        }
+        let rate = file.fileFormat.sampleRate
+        let duration = Double(file.length) / rate
+        json["sampleRate"] = rate
+        json["channels"] = Int(file.fileFormat.channelCount)
+        json["duration"] = (duration * 1000).rounded() / 1000
+        var ok = file.length > 0
+        if !format.isLossless, rate != 44_100 { ok = false }
+        if let expectedDuration, abs(duration - expectedDuration) > 1_152.0 / 44_100 + 0.01 {
+            json["durationError"] = "expected \(expectedDuration) s"
+            ok = false
+        }
+        if format.writesTags {
+            if format == .flac {
+                // AVFoundation doesn't read Vorbis comments; look for the field itself.
+                let data = (try? Data(contentsOf: url, options: .alwaysMapped)) ?? Data()
+                let found = data.prefix(4 << 20).range(of: Data("TITLE=".utf8)) != nil
+                json["tagged"] = found
+                ok = ok && found
+            } else {
+                let tags = await AudioTags.read(from: url)
+                json["title"] = orNull(tags.title)
+                json["artist"] = orNull(tags.artist)
+                json["album"] = orNull(tags.album)
+                json["artworkBytes"] = tags.artwork?.count ?? 0
+                ok = ok && (tags.title?.hasSuffix(expectedTitleSuffix) ?? false)
+            }
+        }
+        json["ok"] = ok
+        return (ok, json)
     }
 
     private static func describe(_ state: DJApolloSetupState) -> String {

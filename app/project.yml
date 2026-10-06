@@ -15,6 +15,8 @@ packages:
     path: ../Packages/StemsKit
   ApolloBridge:
     path: ../Packages/ApolloBridge
+  AudioExport:
+    path: ../Packages/AudioExport
 
 schemes:
   DJTools:
@@ -84,6 +86,7 @@ targets:
       - package: QualityKit
       - package: StemsKit
       - package: ApolloBridge
+      - package: AudioExport
     # Bundles ../apollo as Contents/Resources/apollo/ — the uv project
     # ApolloBridge runs (Bundle.main.url(forResource: "apollo", withExtension: nil)).
     # A copy script rather than a plain folder reference, because a folder

@@ -225,7 +225,10 @@ public enum AudioExporter {
       tagBytes = tag.count
     }
 
-    let capacity = Int(chunkFrames) * 5 / 4 + 7_200
+    // LAME's worst case is 1.25 × output samples + 7200; resampling up (a 24 kHz
+    // source) makes more output samples than input frames.
+    let ratio = max(1, 44_100 / input.processingFormat.sampleRate)
+    let capacity = Int((Double(chunkFrames) * ratio).rounded(.up)) * 5 / 4 + 7_200
     var mp3 = [UInt8](repeating: 0, count: capacity)
     func emit(_ count: Int32) throws {
       guard count >= 0 else { throw AudioExportError.encoder("LAME error \(count).") }
