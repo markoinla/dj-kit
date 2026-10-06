@@ -116,23 +116,34 @@ public actor BeatTracker {
   /// Tempo of mono audio at any sample rate; nil when fewer than 8 beats are found.
   /// Needs prepared weights. Cancellable between chunks.
   public func tempo(monoSamples: [Float], sampleRate: Double) async throws -> TempoEstimate? {
-    TempoEstimate(beatTimes: try await beats(monoSamples: monoSamples, sampleRate: sampleRate))
+    try await tempo(monoSamples: monoSamples, sampleRate: sampleRate, progress: nil)
+  }
+
+  /// Same, reporting the share of chunks done (`MusicalAnalyzer`).
+  func tempo(
+    monoSamples: [Float], sampleRate: Double, progress: (@Sendable (Double) -> Void)?
+  ) async throws -> TempoEstimate? {
+    TempoEstimate(beatTimes: try await beats(monoSamples: monoSamples, sampleRate: sampleRate, progress: progress))
   }
 
   /// Beat times in seconds, as upstream's minimal postprocessor reports them.
-  func beats(monoSamples: [Float], sampleRate: Double) async throws -> [Double] {
-    let logits = try await beatLogits(monoSamples: monoSamples, sampleRate: sampleRate)
+  func beats(
+    monoSamples: [Float], sampleRate: Double, progress: (@Sendable (Double) -> Void)? = nil
+  ) async throws -> [Double] {
+    let logits = try await beatLogits(monoSamples: monoSamples, sampleRate: sampleRate, progress: progress)
     return Self.pickPeaks(logits).map { $0 / MelSpectrogram.framesPerSecond }
   }
 
   /// Frame-wise (50 fps) beat logits for the whole track.
-  func beatLogits(monoSamples: [Float], sampleRate: Double) async throws -> [Float] {
+  func beatLogits(
+    monoSamples: [Float], sampleRate: Double, progress: (@Sendable (Double) -> Void)? = nil
+  ) async throws -> [Float] {
     guard sampleRate > 0 else { throw BeatTrackerError.audio("Bad sample rate \(sampleRate)") }
     let signal = try MelSpectrogram.resample(monoSamples, from: sampleRate)
     try Task.checkCancellation()
     let (mel, frames) = MelSpectrogram.compute(signal)
     guard frames > 0 else { return [] }
-    return try await logits(mel: mel, frames: frames)
+    return try await logits(mel: mel, frames: frames, progress: progress)
   }
 
   private func loadModel() throws -> BeatThisModel {
@@ -152,7 +163,7 @@ public actor BeatTracker {
   }
 
   /// Runs the model over [frames × 128] log-mel in bordered chunks and stitches the logits.
-  func logits(mel: [Float], frames: Int) async throws -> [Float] {
+  func logits(mel: [Float], frames: Int, progress: (@Sendable (Double) -> Void)? = nil) async throws -> [Float] {
     let model = try loadModel()
     let bands = MelSpectrogram.bands, border = Self.borderFrames
     // Each chunk: mel[max(s,0) ..< min(s+1500, T)], zero-padded left by max(0,-s) and right by
@@ -177,6 +188,7 @@ public actor BeatTracker {
       let out = model(MLXArray(chunk.data, [1, chunk.length, bands]))
       eval(out)
       predictions.append(out.asArray(Float.self))
+      progress?(Double(predictions.count) / Double(chunks.count))
       await Task.yield()
     }
     Memory.clearCache()
