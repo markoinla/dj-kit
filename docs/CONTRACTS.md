@@ -134,7 +134,7 @@ public enum AudioFileFormat: String, CaseIterable, Codable, Sendable {   // raw 
   public var fileExtension: String; public var isLossless: Bool; public var writesTags: Bool
   public var title: String; public var shortTitle: String
 }
-public struct AudioTags: Sendable, Equatable {        // title, artist, album, artwork
+public struct AudioTags: Sendable, Equatable {   // title, artist, album, artwork, genre, year, label, isrc, comment, bpm, key
   public static func read(from url: URL) async -> AudioTags
   public func suffixingTitle(_ suffix: String, fallbackTitle: String) -> AudioTags
 }
