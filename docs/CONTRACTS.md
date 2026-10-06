@@ -1,7 +1,8 @@
 # Module contracts
 
-The app is a native SwiftUI macOS app plus three local Swift packages and one Python
-project. Each piece is built by a separate worker; these are the seams between them.
+The app is a native SwiftUI macOS app plus four local Swift packages it links
+(QualityKit, StemsKit, ApolloMLX, AudioExport). The Python Apollo project and its Swift
+bridge stay in the repo as the reference implementation but are no longer linked. Each piece is built by a separate worker; these are the seams between them.
 Change a contract only by editing this file and saying so.
 
 Common: macOS 14.4 minimum (matches Wax Studio), Swift 6 language mode, Apple Silicon
@@ -42,9 +43,13 @@ public actor StemSeparator {
 }
 ```
 Writes `<outputDirectory>/<track name> (Stems)/<stem>.wav`. Model weights download on first
-use into App Support (`DJTools/models/`), never into the bundle.
+use into App Support (`DJTools/models/`), never into the bundle. (The app runs it into a
+scratch folder and saves the result through AudioExport; see below.)
 
-## apollo/ + Packages/ApolloBridge — Apollo repair, Python behind a Swift bridge
+## apollo/ + Packages/ApolloBridge — Apollo repair, Python behind a Swift bridge (reference only)
+
+No longer linked or bundled by the app (replaced by ApolloMLX below). Kept untouched as the
+reference implementation the MLX port is checked against.
 
 `apollo/` is a uv project (Python) wrapping https://github.com/JusperLee/Apollo inference,
 weights from Hugging Face `JusperLee/Apollo`. Entry point:
@@ -56,7 +61,7 @@ stdout is JSON lines, one object per line, nothing else on stdout (logs go to st
 `{"event":"status","message":"Loading model"}`, `{"event":"progress","fraction":0.42}`,
 `{"event":"done","output":"/path/OUT.wav"}`, `{"event":"error","message":"..."}`. Exit 0 on success.
 
-The app bundles `apollo/` as a resource. `ApolloBridge` (pure Swift, no Python linkage):
+`ApolloBridge` (pure Swift, no Python linkage):
 
 ```swift
 public enum ApolloSetupState: Sendable, Equatable { case notInstalled, installing(String), ready, failed(String) }
@@ -78,21 +83,57 @@ installer (no Homebrew, no sudo) and keeps uv's cache, Python and venv under
 
 ## app/ — the SwiftUI shell (XcodeGen, `app/project.yml`)
 
-Depends on the three packages by local path. Drop files or folders in; each track gets
+Depends on QualityKit, StemsKit, ApolloMLX and AudioExport by local path. Drop files or folders in; each track gets
 actions Check Quality, Separate Stems, Repair (Apollo); a job queue shows progress;
 results land in the output folder with Reveal in Finder. Design follows Wax Studio
 (`Wax Studio`, see its `WaxMac/DesignSystem`).
 
-## Packages/ApolloMLX — experimental native port of Apollo (MLX Swift)
+## Packages/ApolloMLX — native port of Apollo (MLX Swift), the app's repair engine
 
-Same job as the Python bridge, no Python. Built to compare speed and quality against it;
-the app may later swap it in behind the same `ApolloRepairing` seam.
+Same job as the Python bridge, no Python. Verified on build-mac (M5 Air, 16 GB): fp32 parity
+62.8 dB SNR vs PyTorch on music (119 dB on white noise); fp16 4:00 track in 82 s / 2.7 GiB
+peak vs Python MPS 131 s / 4.4 GiB. Wired into the app behind `ApolloRepairing`
+(`ApolloMLXAdapter`, fp16) since 2026-10-06; the app sets `MLX_ENABLE_TF32=0` at launch.
 
 ```swift
 public actor ApolloMLXRepairer {
-  public init(modelsDirectory: URL)            // default App Support/DJTools/models/apollo-mlx
-  public func prepare(progress: @escaping @Sendable (String) -> Void) async throws   // fetch/convert weights
+  public init(modelsDirectory: URL)            // app: App Support/DJTools/models/apollo-mlx
+  public var isPrepared: Bool { get }          // converted weights exist
+  public func prepare(progress: @escaping @Sendable (String) -> Void) async throws
+      // download pinned HF checkpoint (66 MB), SHA-256 check, convert in Swift → apollo-mlx.safetensors
   public func repair(input: URL, output: URL,
                      progress: @escaping @Sendable (Double) -> Void) async throws -> URL
+      // 44.1 kHz 24-bit WAV; cancel by cancelling the calling Task (checked between chunks)
+  public func removeWeights() throws
 }
 ```
+
+## Packages/AudioExport — save results as AIFF, WAV, FLAC or MP3
+
+Converts a finished PCM WAV (the engines' output) to the user's chosen file type, with tags.
+Pure Swift + AudioToolbox, plus vendored LAME 3.100 (LGPL, encoder only) for MP3.
+
+```swift
+public enum AudioFileFormat: String, CaseIterable, Codable, Sendable {   // raw values are stored
+  case aiff, wav, flac, mp3_320 = "mp3-320", mp3_256 = "mp3-256", mp3_192 = "mp3-192"
+  public var fileExtension: String; public var isLossless: Bool; public var writesTags: Bool
+  public var title: String; public var shortTitle: String
+}
+public struct AudioTags: Sendable, Equatable {        // title, artist, album, artwork
+  public static func read(from url: URL) async -> AudioTags
+  public func suffixingTitle(_ suffix: String, fallbackTitle: String) -> AudioTags
+}
+public enum AudioExporter {
+  public static func export(_ source: URL, to destination: URL, format: AudioFileFormat,
+                            tags: AudioTags? = nil, removingSource: Bool = false,
+                            progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL
+}
+```
+Lossless keeps the source's rate and is bit-exact (24-bit, 16-bit for 16-bit sources). MP3 is
+CBR joint stereo `-q 0`, resampled to 44.1 kHz, with a LAME/Info tag (exact length). Tags go
+into AIFF (ID3 chunk), FLAC (Vorbis comments + picture) and MP3 (ID3v2.3); WAV gets none.
+Atomic write; cancelling the task leaves nothing behind.
+
+The app (`ResultWriter`) runs each heavy engine into a scratch folder, exports, deletes the
+WAVs: `<out>/<track> (Stems)/<stem>.<ext>` and `<out>/<track> (Apollo).<ext>`. AIFF is the
+default for both (Rekordbox reads its tags and artwork).
