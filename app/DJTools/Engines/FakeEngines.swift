@@ -107,7 +107,7 @@ actor FakeApolloRuntime: ApolloRepairing {
     func install(progress: @escaping @Sendable (String) -> Void) async throws {
         let steps: [(String, Int)] = [
             ("Downloading uv", 4),
-            ("Installing Python 3.11", 6),
+            ("Installing Python 3.12", 6),
             ("Installing PyTorch and dependencies", 14),
             ("Downloading Apollo model weights", 10),
             ("Checking the model", 4),
@@ -126,13 +126,19 @@ actor FakeApolloRuntime: ApolloRepairing {
         progress("Ready")
     }
 
-    func repair(input: URL, output: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+    func repair(
+        input: URL, output: URL,
+        progress: @escaping @Sendable (Double) -> Void,
+        status: @escaping @Sendable (String) -> Void
+    ) async throws -> URL {
         guard FileManager.default.fileExists(atPath: marker.path) else {
             throw FakeEngineError("Apollo isn't set up yet.")
         }
         let steps = 40
         progress(0)
+        status("Loading model")
         for step in 1...steps {
+            if step == 4 { status("Repairing on MPS") }
             try await Task.sleep(for: .seconds(8.0 / speed / Double(steps)))
             progress(Double(step) / Double(steps))
         }

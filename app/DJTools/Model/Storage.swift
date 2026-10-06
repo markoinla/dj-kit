@@ -3,9 +3,13 @@ import Observation
 
 /// Where the app keeps things (docs/CONTRACTS.md: App Support/DJTools).
 enum AppPaths {
-    /// `~/Library/Application Support/DJTools/`.
+    /// `~/Library/Application Support/DJTools/`, or `-supportDirectory <path>`
+    /// (for `-selfTest` runs and testing, so they don't touch the real one).
     static var support: URL {
-        URL.applicationSupportDirectory.appending(path: "DJTools", directoryHint: .isDirectory)
+        if let path = LaunchArguments.value("supportDirectory") {
+            return URL(filePath: path, directoryHint: .isDirectory).absoluteURL.standardizedFileURL
+        }
+        return URL.applicationSupportDirectory.appending(path: "DJTools", directoryHint: .isDirectory)
     }
 
     /// `~/Music/DJ Tools/`.

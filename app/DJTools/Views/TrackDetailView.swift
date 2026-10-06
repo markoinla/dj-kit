@@ -77,16 +77,24 @@ struct TrackDetailContent: View {
                 ToolCard(
                     systemImage: "wand.and.stars",
                     title: "Repair with Apollo",
-                    message: "Rebuilds the high end that lossy encoding cut off and writes a new WAV. The original stays as it is.",
+                    message: "Rebuilds the high end that lossy encoding cut off and writes a new WAV. The original stays as it is. Takes about as long as the track: a 4-minute track is about 4 minutes on an M-series MacBook Air.",
                     jobs: tracks.compactMap { model.job(for: $0.id, kind: .repair) },
                     multi: tracks.count > 1,
                     suggestion: suggestion(tracks: tracks, lowCount: lowCount)
                 ) {
-                    if model.apolloState != .ready {
-                        Label("First use downloads the repair engine, about 1–2 GB.", systemImage: "arrow.down.circle")
-                            .djText(.caption)
-                            .foregroundStyle(DJColor.mutedForeground)
-                            .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if model.apolloState != .ready {
+                            Label("First use downloads the repair engine, about 600 MB.", systemImage: "arrow.down.circle")
+                                .djText(.caption)
+                                .foregroundStyle(DJColor.mutedForeground)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let note = lowSourceNote(tracks) {
+                            Label(note, systemImage: "ear")
+                                .djText(.caption)
+                                .foregroundStyle(DJColor.mutedForeground)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 } action: {
                     Button(repairTitle(tracks: tracks, lowCount: lowCount), systemImage: "wand.and.stars") {
@@ -99,6 +107,20 @@ struct TrackDetailContent: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// A gentle heads-up for very low-bitrate or low-sample-rate sources.
+    private func lowSourceNote(_ tracks: [Track]) -> String? {
+        let low = tracks.filter(\.isVeryLowSource)
+        guard !low.isEmpty else { return nil }
+        let advice = "Results vary from sources this rough, so listen before replacing the original."
+        if tracks.count == 1, let quality = low.first?.quality {
+            let why = quality.sampleRate < 44_100
+                ? "This file was recorded at \(DJFormat.kHz(quality.sampleRate))."
+                : "This is a \(quality.declaredBitrateKbps ?? 0) kbps file."
+            return "\(why) \(advice)"
+        }
+        return "\(low.count) of these are very low bitrate. \(advice)"
     }
 
     private func suggestion(tracks: [Track], lowCount: Int) -> String? {

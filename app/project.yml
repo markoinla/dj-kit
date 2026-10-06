@@ -6,9 +6,15 @@ options:
   createIntermediateGroups: true
   xcodeVersion: "16.4"
 
-# The engine packages (Packages/QualityKit, Packages/StemsKit,
-# Packages/ApolloBridge) are added here by the integrator — see
-# DJTools/Engines/README.md. Until then the app runs on fake engines.
+# The engine packages, by local path (DJTools/Engines/README.md).
+# Packages/ApolloMLX is experimental and not linked.
+packages:
+  QualityKit:
+    path: ../Packages/QualityKit
+  StemsKit:
+    path: ../Packages/StemsKit
+  ApolloBridge:
+    path: ../Packages/ApolloBridge
 
 schemes:
   DJTools:
@@ -67,8 +73,37 @@ targets:
         PRODUCT_NAME: DJTools
         INFOPLIST_FILE: DJTools/Info.plist
         ENABLE_HARDENED_RUNTIME: NO
+        # Never sandboxed: Apollo spawns uv and Python from App Support.
         ENABLE_APP_SANDBOX: NO
         ENABLE_PREVIEWS: YES
+        # The "Bundle apollo/" script writes a whole folder into Resources.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     dependencies:
       - sdk: AVFoundation.framework
+      - package: QualityKit
+      - package: StemsKit
+      - package: ApolloBridge
+    # Bundles ../apollo as Contents/Resources/apollo/ — the uv project
+    # ApolloBridge runs (Bundle.main.url(forResource: "apollo", withExtension: nil)).
+    # A copy script rather than a plain folder reference, because a folder
+    # reference can't exclude anything: this ships only what uv needs and the
+    # licence files, never tests/, .venv, caches or __pycache__.
+    postCompileScripts:
+      - name: Bundle apollo/
+        basedOnDependencyAnalysis: false
+        shell: /bin/bash
+        script: |
+          set -euo pipefail
+          src="${SRCROOT}/../apollo"
+          dest="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/apollo"
+          rm -rf "$dest"
+          mkdir -p "$dest"
+          cd "$src"
+          for f in pyproject.toml uv.lock .python-version LICENSE NOTICE.md; do
+            [ -f "$f" ] || { echo "error: apollo/$f is missing"; exit 1; }
+          done
+          /usr/bin/rsync -a \
+            --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' \
+            --exclude '.pytest_cache' --exclude '.ruff_cache' --exclude '.mypy_cache' \
+            pyproject.toml uv.lock .python-version LICENSE NOTICE.md src "$dest/"

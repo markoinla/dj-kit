@@ -41,6 +41,10 @@ enum Thresholds {
     static let fakeLosslessMaxNyquistFraction = 0.88
     /// Lossy file whose highs stop at or below this is low quality.
     static let lowQualityMaxCutoffHz = 16_500.0
-    /// Lossy file declared below this bitrate is low quality.
+    /// Lossy file whose highs reach at least this is good, whatever its average bitrate:
+    /// the measured band beats the declared rate (a ~184 kbps VBR MP3 reaching 18.8 kHz is fine).
+    static let goodLossyMinCutoffHz = 18_000.0
+    /// Lossy file declared below this bitrate is low quality — only used when the cutoff
+    /// can't be measured, or falls between `lowQualityMaxCutoffHz` and `goodLossyMinCutoffHz`.
     static let lowQualityMaxBitrateKbps = 192
 }
