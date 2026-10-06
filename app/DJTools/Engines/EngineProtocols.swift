@@ -30,7 +30,7 @@ protocol ApolloRepairing: Sendable {
     /// One-time setup (the model weights). `progress` gets status lines for the UI.
     func install(progress: @escaping @Sendable (String) -> Void) async throws
     /// `status` gets status lines ("Loading model", "Repairing", "Writing
-    /// output") for the queue row.
+    /// output") for the running step.
     func repair(
         input: URL, output: URL,
         progress: @escaping @Sendable (Double) -> Void,

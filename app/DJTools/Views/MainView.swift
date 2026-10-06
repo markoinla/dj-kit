@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The main window: dropped tracks in the sidebar, the selection's detail,
-/// and the job queue at the right edge. Dropping files or folders anywhere
-/// in the window adds them.
+/// The main window: dropped tracks in the sidebar and the selection's
+/// detail, where its steps are set up, run and finished. Dropping files or
+/// folders anywhere in the window adds and selects them.
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
@@ -18,18 +18,9 @@ struct MainView: View {
             TrackSidebar(selection: $selection)
                 .navigationSplitViewColumnWidth(min: DJSize.sidebarMin, ideal: DJSize.sidebarIdeal, max: DJSize.sidebarMax)
         } detail: {
-            HStack(spacing: 0) {
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if model.isShowingJobs {
-                    Rectangle().fill(DJColor.border).frame(width: 1)
-                    JobsPanel { model.isShowingJobs = false }
-                        .frame(width: DJSize.jobsPanelWidth)
-                        .transition(.move(edge: .trailing))
-                }
-            }
-            .animation(.snappy(duration: 0.2), value: model.isShowingJobs)
-            .background(DJColor.background)
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(DJColor.background)
             .toolbar { toolbar }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let notice = model.notice {
@@ -56,21 +47,17 @@ struct MainView: View {
         .sheet(item: $model.apolloSetup) { request in
             ApolloSetupSheet(request: request)
         }
-        .sheet(item: $model.processRequest) { request in
-            ProcessSheet(request: request)
-        }
         .onChange(of: model.tracks.map(\.id)) { _, ids in
             selection.formIntersection(ids)
         }
         .onChange(of: DockStatus(model: model)) { _, status in status.show() }
     }
 
-    /// Adds, selects the new tracks and asks what to do with them.
+    /// Adds and selects the new tracks: the detail shows their steps.
     private func add(_ urls: [URL]) {
         let added = model.add(urls)
         guard !added.isEmpty else { return }
         selection = Set(added)
-        model.processRequest = ProcessRequest(trackIDs: added)
     }
 
     private var selectedIDs: [Track.ID] {
@@ -102,11 +89,6 @@ struct MainView: View {
             Button("Add Tracks…", systemImage: "plus") { isImporting = true }
                 .keyboardShortcut("o")
                 .help("Add audio files or a folder (⌘O)")
-            Button("Queue", systemImage: model.activeJobCount > 0 ? "list.bullet.rectangle.fill" : "list.bullet.rectangle") {
-                model.isShowingJobs.toggle()
-            }
-            .keyboardShortcut("j")
-            .help(model.activeJobCount > 0 ? "\(DJFormat.count(model.activeJobCount, "job")) in the queue (⌘J)" : "Show the queue (⌘J)")
             Button("Settings", systemImage: "gearshape") { openSettings() }
                 .help("Settings (⌘,)")
         }

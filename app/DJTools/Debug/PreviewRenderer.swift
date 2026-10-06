@@ -9,9 +9,9 @@ import UniformTypeIdentifiers
 /// PNGs via `ImageRenderer`, no window or GUI session needed, then exits.
 ///
 /// `ImageRenderer` can't draw AppKit-backed views (List, ScrollView, Form,
-/// sheets), so each screen is the app's own content views laid out in a
-/// stand-in window: the sidebar's rows in a plain stack, the detail without
-/// its scroll view, the sheet over a dimmed window.
+/// sheets, popovers), so each screen is the app's own content views laid out
+/// in a stand-in window: the sidebar's groups and rows in a plain stack, the
+/// detail without its scroll view, the sheet over a dimmed window.
 @MainActor
 enum PreviewRenderer {
     static let size = CGSize(width: 1180, height: 760)
@@ -19,60 +19,42 @@ enum PreviewRenderer {
     static func run(into directory: URL) {
         FileCheck.assumeExists = true
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let fixtures = PreviewFixtures()
+        let f = PreviewFixtures()
 
-        let empty = fixtures.model(tracks: [], jobs: [])
-        let busy = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs)
-        let queue = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.queueJobs, showsJobs: true)
-        let installing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs,
-                                        apollo: .installing("Downloading the repair model (66 MB)"))
-        let repairing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.repairJobs, apollo: .ready, showsJobs: true)
+        let empty = f.model(tracks: [], jobs: [])
+        let session = f.model(tracks: f.tracks, jobs: f.sessionJobs, apollo: .ready)
+        let multiRunning = f.model(tracks: f.tracks, jobs: f.multiJobs, apollo: .ready)
+        let fresh = f.model(tracks: f.tracks, jobs: f.sessionJobs)
+        let installing = f.model(tracks: f.tracks, jobs: f.sessionJobs, apollo: .installing("Downloading the repair model (66 MB)"))
         // Last run saved as MP3 320: the format menu and the MP3 warning beside it.
-        let repairAsMP3 = fixtures.model(tracks: fixtures.tracks, jobs: [], apollo: .ready, settings: fixtures.mp3Settings)
+        let asMP3 = f.model(tracks: f.tracks, jobs: f.sessionJobs, apollo: .ready, settings: f.mp3Settings)
 
-        var shots: [(String, AnyView)] = [
-            ("01-welcome", AnyView(PreviewWindow(model: empty, selection: []))),
-            ("02-track-low-quality", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id]))),
-            ("03-track-lossless-results", AnyView(PreviewWindow(model: busy, selection: [fixtures.floatingPoints.id]))),
-            ("04-multi-select", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id, fixtures.fred.id, fixtures.ross.id]))),
-            ("05-queue", AnyView(PreviewWindow(model: queue, selection: [fixtures.bicep.id]))),
-            ("06-apollo-setup", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id],
-                                                      sheet: AnyView(ApolloSetupContent(state: .notInstalled, trackCount: 1))))),
-            ("07-apollo-installing", AnyView(PreviewWindow(model: installing, selection: [fixtures.overmono.id],
-                                                           sheet: AnyView(ApolloSetupContent(state: installing.apolloState, trackCount: 1))))),
-            ("08-track-checking", AnyView(PreviewWindow(model: busy, selection: [fixtures.kettama.id]))),
-            ("09-track-very-low-source", AnyView(PreviewWindow(model: repairing, selection: [fixtures.burial.id]))),
-            ("10-track-repair-as-mp3", AnyView(PreviewWindow(model: repairAsMP3, selection: [fixtures.bicep.id]))),
-            ("20-process-sheet", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id],
-                                                       sheet: AnyView(ProcessSheet(request: ProcessRequest(trackIDs: [fixtures.overmono.id])))))),
-            ("21-process-sheet-multi", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id, fixtures.fred.id, fixtures.floatingPoints.id],
-                                                             sheet: AnyView(ProcessSheet(request: ProcessRequest(trackIDs: [fixtures.overmono.id, fixtures.fred.id, fixtures.floatingPoints.id])))))),
-            ("22-dark-process-sheet", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id],
-                                                            sheet: AnyView(ProcessSheet(request: ProcessRequest(trackIDs: [fixtures.overmono.id])))))),
-        ]
-        // The Normalize row: measured (−6.2 → −10.0 LUFS) and capped by the ceiling, in a taller window.
-        let normalizing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.normalizeJobs, apollo: .ready, showsJobs: true)
-        let tall: [(String, AnyView)] = [
-            ("15-normalize-measured", AnyView(PreviewWindow(model: busy, selection: [fixtures.ross.id]))),
-            ("16-normalize-capped", AnyView(PreviewWindow(model: busy, selection: [fixtures.floatingPoints.id]))),
-            ("17-normalize-running", AnyView(PreviewWindow(model: normalizing, selection: [fixtures.bicep.id]))),
-            ("18-normalize-multi", AnyView(PreviewWindow(model: busy, selection: [fixtures.floatingPoints.id, fixtures.ross.id, fixtures.fred.id, fixtures.bicep.id]))),
-            ("19-dark-normalize-capped", AnyView(PreviewWindow(model: busy, selection: [fixtures.floatingPoints.id]))),
-        ]
-        shots.append(contentsOf: [
-            ("11-dark-track-low-quality", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id]))),
-            ("12-dark-queue", AnyView(PreviewWindow(model: queue, selection: [fixtures.bicep.id]))),
-            ("14-dark-track-repair-as-mp3", AnyView(PreviewWindow(model: repairAsMP3, selection: [fixtures.bicep.id]))),
-            ("13-dark-welcome", AnyView(PreviewWindow(model: empty, selection: []))),
-        ])
-
-        for (name, view) in shots {
-            let dark = name.contains("-dark-")
-            render(view, dark: dark, to: directory.appending(path: "\(name).png"))
+        func window(_ model: AppModel, _ selection: [Track], sheet: AnyView? = nil) -> AnyView {
+            AnyView(PreviewWindow(model: model, selection: Set(selection.map(\.id)), sheet: sheet))
         }
-        for (name, view) in tall {
-            render(view, dark: name.contains("-dark-"), size: CGSize(width: size.width, height: 1_040),
-                   to: directory.appending(path: "\(name).png"))
+        let shots: [(String, AnyView)] = [
+            ("01-welcome", window(empty, [])),
+            ("02-setup-lossy", window(session, [f.overmono])),
+            ("03-setup-lossless-match", window(session, [f.kettama])),
+            ("04-setup-analyzing", window(session, [f.sammy])),
+            ("05-setup-multi", window(session, [f.overmono, f.ross, f.kettama])),
+            ("06-processing", window(session, [f.bicep])),
+            ("07-processing-queued", window(session, [f.fred])),
+            ("08-processing-multi", window(multiRunning, [f.bicep, f.fred, f.floatingPoints])),
+            ("09-done", window(session, [f.floatingPoints])),
+            ("10-failed", window(session, [f.burial])),
+            ("11-setup-repair-as-mp3", window(asMP3, [f.overmono])),
+            ("12-apollo-setup", window(fresh, [f.overmono], sheet: AnyView(ApolloSetupContent(state: .notInstalled, trackCount: 1)))),
+            ("13-apollo-installing", window(installing, [f.overmono],
+                                            sheet: AnyView(ApolloSetupContent(state: installing.apolloState, trackCount: 1)))),
+            ("14-dark-setup-lossy", window(session, [f.overmono])),
+            ("15-dark-processing", window(session, [f.bicep])),
+            ("16-dark-done", window(session, [f.floatingPoints])),
+            ("17-dark-setup-multi", window(session, [f.overmono, f.ross, f.kettama])),
+            ("18-dark-welcome", window(empty, [])),
+        ]
+        for (name, view) in shots {
+            render(view, dark: name.contains("-dark-"), to: directory.appending(path: "\(name).png"))
         }
     }
 
@@ -113,15 +95,8 @@ private struct PreviewWindow: View {
             Rectangle().fill(DJColor.border).frame(width: 1)
             VStack(spacing: 0) {
                 toolbar
-                HStack(spacing: 0) {
-                    detail
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    if model.isShowingJobs {
-                        Rectangle().fill(DJColor.border).frame(width: 1)
-                        JobsPanel(scrolls: false)
-                            .frame(width: DJSize.jobsPanelWidth)
-                    }
-                }
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .background(DJColor.background)
         }
@@ -157,32 +132,34 @@ private struct PreviewWindow: View {
                 Spacer()
                 VStack(spacing: DJSpace.xs) {
                     Text("No tracks yet").djText(.headline).foregroundStyle(DJColor.foreground)
-                    Text("Drop audio into the window.").djText(.caption).foregroundStyle(DJColor.mutedForeground)
+                    Text("Drop audio here").djText(.caption).foregroundStyle(DJColor.mutedForeground)
                 }
                 .frame(maxWidth: .infinity)
                 Spacer()
             } else {
-                SidebarHeader(title: "Tracks", count: model.tracks.count)
-                    .padding(.leading, 18)
-                    .padding(.top, DJSpace.xs)
-                    .padding(.bottom, 6)
-                VStack(spacing: 2) {
-                    ForEach(model.tracks) { track in
-                        TrackRow(track: track, job: model.activeJob(for: track.id))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background {
-                                if selection.contains(track.id) {
-                                    RoundedRectangle(cornerRadius: DJRadius.md).fill(DJColor.sidebarAccent)
+                // The List's groups, as `TrackSidebar` builds them.
+                ForEach(model.trackGroups, id: \.stage) { group in
+                    SidebarHeader(title: group.stage.title, count: group.tracks.count)
+                        .padding(.leading, 18)
+                        .padding(.top, DJSpace.sm)
+                        .padding(.bottom, 4)
+                    VStack(spacing: 2) {
+                        ForEach(group.tracks) { track in
+                            SidebarTrackRow(track: track, stage: group.stage)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background {
+                                    if selection.contains(track.id) {
+                                        RoundedRectangle(cornerRadius: DJRadius.md).fill(DJColor.sidebarAccent)
+                                    }
                                 }
-                            }
+                        }
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, DJSpace.xs)
                 }
-                .padding(.horizontal, 10)
                 Spacer()
-                if let job = model.runningHeavyJob {
-                    SidebarActivityCard(job: job, waiting: model.activeHeavyJobs.count - 1)
-                }
             }
         }
         .frame(maxHeight: .infinity)
@@ -200,7 +177,7 @@ private struct PreviewWindow: View {
                     .padding(.vertical, 2)
                     .background(Capsule().fill(DJColor.markerSurface))
             }
-            ForEach(["plus", model.activeJobCount > 0 ? "list.bullet.rectangle.fill" : "list.bullet.rectangle", "gearshape"], id: \.self) { icon in
+            ForEach(["plus", "gearshape"], id: \.self) { icon in
                 Image(systemName: icon)
                     .font(.system(size: 14))
                     .foregroundStyle(DJColor.mutedForeground)
@@ -233,17 +210,23 @@ struct PreviewFixtures {
     let kettama: Track
     let bicep: Track
     let burial: Track
+    let sammy: Track
     let settings = AppSettings(defaults: UserDefaults(suiteName: "la.marko.djtools.previews")!)
     let mp3Settings = AppSettings(defaults: UserDefaults(suiteName: "la.marko.djtools.previews.mp3")!)
 
-    var tracks: [Track] { [floatingPoints, overmono, fred, ross, kettama, bicep, burial] }
+    var tracks: [Track] { [floatingPoints, overmono, fred, ross, kettama, bicep, burial, sammy] }
+
+    private static let target = DJLoudnessTarget(lufs: -10, ceilingDBTP: -1)
 
     init() {
-        settings.lastRecipe = ProcessRecipe()
+        var recipe = ProcessRecipe()
+        recipe.stems = true
+        settings.lastRecipe = recipe
         var mp3 = ProcessRecipe()
         mp3.format = .mp3_320
         mp3Settings.lastRecipe = mp3
         let folder = URL.musicDirectory.appending(path: "Promos/October 2026", directoryHint: .isDirectory)
+        let output = URL.musicDirectory.appending(path: "DJ Tools", directoryHint: .isDirectory)
         let now = Date()
         func track(_ file: String, _ verdict: DJQualityVerdict?, bitrate: Int?, cutoff: Double?, duration: TimeInterval,
                    size: Int64, summary: String) -> Track {
@@ -260,111 +243,119 @@ struct PreviewFixtures {
             }
             return track
         }
+        func loudness(_ lufs: Double, peak: Double, duration: TimeInterval) -> DJLoudnessReport {
+            DJLoudnessReport(integratedLUFS: lufs, truePeakDBTP: peak, samplePeakDBFS: peak - 0.2,
+                             loudnessRangeLU: 6, duration: duration, sampleRate: 44_100, channels: 2)
+        }
+
+        // Done: normalized and split into four stems an hour ago.
         var fp = track("Floating Points - Silhouettes (I, II & III).flac", .lossless, bitrate: 1012, cutoff: 21_950,
                        duration: 653, size: 82_400_000, summary: "Full range up to 22 kHz — genuinely lossless")
-        let stemsFolder = URL.musicDirectory.appending(path: "DJ Tools/\(fp.name) (Stems)", directoryHint: .isDirectory)
+        fp.loudness = loudness(-15.3, peak: -3.0, duration: 653)
+        fp.identifiedAt = now
+        let stemsFolder = output.appending(path: "\(fp.name) (Stems)", directoryHint: .isDirectory)
         fp.results = [
             TrackResult(kind: .processed(ProcessedFiles(
-                            repaired: false, stemModel: .htdemucsFT, stemsFolder: stemsFolder,
-                            stems: Dictionary(uniqueKeysWithValues: DJStemModel.htdemucsFT.stemNames.map {
-                                ($0, stemsFolder.appending(path: "\($0).aiff"))
+                            output: output.appending(path: "\(fp.name).aiff"),
+                            repaired: false,
+                            normalization: DJNormalizationPlan.pureGain(for: fp.loudness!, target: Self.target),
+                            stemModel: .htdemucs, stemsFolder: stemsFolder,
+                            stems: Dictionary(uniqueKeysWithValues: DJStemModel.htdemucs.stemNames.map {
+                                ($0, stemsFolder.appending(path: "\(fp.name) (\($0.capitalized)).aiff"))
                             }))),
                         finishedAt: now.addingTimeInterval(-3_600)),
         ]
-        // Quiet and dynamic: reaching −10 LUFS would clip, so the plan stops at the ceiling.
-        fp.loudness = DJLoudnessReport(integratedLUFS: -15.3, truePeakDBTP: -3.0, samplePeakDBFS: -3.2,
-                                       loudnessRangeLU: 9.4, duration: 653, sampleRate: 44_100, channels: 2)
         floatingPoints = fp
-        overmono = track("Overmono - So U Kno.mp3", .lowQuality, bitrate: 128, cutoff: 16_000, duration: 312,
-                         size: 5_010_000, summary: "Cuts off at 16 kHz — likely a 128 kbps MP3")
-        fred = track("Fred again.. - Delilah (pull me out of this).wav", .fakeLossless, bitrate: 1411, cutoff: 16_100,
-                     duration: 268, size: 47_300_000, summary: "Cuts off at 16 kHz — a lossy file saved as WAV")
+
+        // Setup, lossy: Repair suggested, loudness measured, Track ID not run.
+        var so = track("Overmono - So U Kno.mp3", .lowQuality, bitrate: 128, cutoff: 16_000, duration: 312,
+                       size: 5_010_000, summary: "Cuts off at 16 kHz — likely a 128 kbps MP3")
+        so.loudness = loudness(-7.9, peak: 0.2, duration: 312)
+        overmono = so
+
+        // Waiting in line behind Bicep.
+        var delilah = track("Fred again.. - Delilah (pull me out of this).wav", .fakeLossless, bitrate: 1411, cutoff: 16_100,
+                            duration: 268, size: 47_300_000, summary: "Cuts off at 16 kHz — a lossy file saved as WAV")
+        delilah.identifiedAt = now
+        fred = delilah
+
+        // A loud club master: comes down 3.8 dB.
         var rff = track("Ross From Friends - Talk To Me You'll Understand.m4a", .goodLossy, bitrate: 256, cutoff: 19_500,
                         duration: 401, size: 12_800_000, summary: "Cuts off at 19.5 kHz — a good 256 kbps encode")
-        // A loud club master: comes down 3.8 dB.
-        rff.loudness = DJLoudnessReport(integratedLUFS: -6.2, truePeakDBTP: 0.4, samplePeakDBFS: 0,
-                                        loudnessRangeLU: 4.1, duration: 401, sampleRate: 44_100, channels: 2)
+        rff.loudness = loudness(-6.2, peak: 0.4, duration: 401)
+        rff.identifiedAt = now
         ross = rff
-        kettama = track("Kettama - It Gets Better.aiff", nil, bitrate: nil, cutoff: nil, duration: 0,
-                        size: 61_000_000, summary: "")
+
+        // Lossless, with a Track ID match waiting for Apply.
+        var ktm = track("KTMA_IGB_master_v3.aiff", .lossless, bitrate: nil, cutoff: 21_900, duration: 384,
+                        size: 67_800_000, summary: "Full range up to 22 kHz — genuinely lossless")
+        ktm.loudness = loudness(-8.4, peak: -0.6, duration: 384)
+        ktm.identity = DJTrackIdentity(title: "It Gets Better", artist: "Kettama", album: "It Gets Better",
+                                       label: "Steel City Dance Discs", genre: "House", releaseDate: "2026-09-12",
+                                       durationSeconds: 386, hits: 3, listens: 3)
+        ktm.identifiedAt = now
+        kettama = ktm
+
+        // Repairing now, stems after.
         var glue = track("Bicep - Glue (Original Mix).mp3", .lowQuality, bitrate: 160, cutoff: 16_500, duration: 269,
                          size: 5_400_000, summary: "Cuts off at 16.5 kHz — likely a 160 kbps MP3")
-        glue.loudness = DJLoudnessReport(integratedLUFS: -8.7, truePeakDBTP: -0.2, samplePeakDBFS: -0.4,
-                                         loudnessRangeLU: 5.2, duration: 269, sampleRate: 44_100, channels: 2)
-        let normalizedPlan = DJNormalizationPlan.pureGain(for: glue.loudness!, target: DJLoudnessTarget(lufs: -10, ceilingDBTP: -1))
-        glue.results = [
-            TrackResult(kind: .processed(ProcessedFiles(
-                            output: URL.musicDirectory.appending(path: "DJ Tools/Bicep - Glue.aiff"),
-                            repaired: true, normalization: normalizedPlan)),
-                        finishedAt: now.addingTimeInterval(-600)),
-        ]
+        glue.identifiedAt = now
         bicep = glue
-        burial = track("Burial - Archangel (old rip).mp3", .lowQuality, bitrate: 64, cutoff: 11_000, duration: 238,
-                       size: 1_900_000, summary: "MP3 64 kbps, cuts off at 11.0 kHz — low quality")
+
+        // The last run failed.
+        var archangel = track("Burial - Archangel (old rip).mp3", .lowQuality, bitrate: 64, cutoff: 11_000, duration: 238,
+                              size: 1_900_000, summary: "MP3 64 kbps, cuts off at 11.0 kHz — low quality")
+        archangel.identifiedAt = now
+        burial = archangel
+
+        // Just dropped: checked, Track ID listening.
+        sammy = track("Sammy Virji - I Guess We're Not The Same.mp3", .goodLossy, bitrate: 320, cutoff: 20_000,
+                      duration: 221, size: 8_800_000, summary: "Cuts off at 20 kHz — a good 320 kbps encode")
     }
 
-    private func job(_ track: Track, _ kind: Job.Kind, _ state: Job.State, progress: Double? = nil, result: URL? = nil) -> Job {
+    private func job(_ track: Track, _ kind: Job.Kind, _ state: Job.State, progress: Double? = nil) -> Job {
         var job = Job(trackID: track.id, trackName: track.name, kind: kind, format: .aiff)
         job.state = state
         job.progress = progress
-        job.resultURL = result
         return job
     }
 
-    private static let target = DJLoudnessTarget(lufs: -10, ceilingDBTP: -1)
-
-    private func process(repair: Bool, normalize: Bool = true, stems: Bool = false,
-                         model: DJStemModel = .htdemucs) -> Job.Kind {
+    private func process(repair: Bool, normalize: Bool = true, stems: Bool = false) -> Job.Kind {
         var recipe = ProcessRecipe()
         recipe.repair = repair ? .on : .off
         recipe.normalize = normalize
         recipe.stems = stems
-        recipe.stemModel = model
         return .process(recipe, Self.target)
     }
 
-    /// A check and a Process run going.
-    var liveJobs: [Job] {
-        var running = job(bicep, process(repair: true, stems: true), .running, progress: 0.42)
+    /// Bicep repairing (stems next), Fred waiting, Burial's run failed,
+    /// Sammy's Track ID listening.
+    var sessionJobs: [Job] {
+        var running = job(bicep, process(repair: true, stems: true), .running, progress: 0.18)
+        running.steps = [.repair, .normalize, .stems]
+        running.currentStep = .repair
+        running.stepProgress = 0.42
         running.statusText = "Repairing"
-        return [job(kettama, .quality, .running), running, job(fred, process(repair: true), .queued)]
+        return [
+            running,
+            job(fred, process(repair: true), .queued),
+            job(burial, process(repair: true), .failed("Repair stopped: out of memory.")),
+            job(sammy, .identify, .running, progress: 0.4),
+        ]
     }
 
-    /// A repair running (with Apollo's own status line), another run waiting
-    /// behind it: heavy runs never overlap.
-    var repairJobs: [Job] {
-        var repair = job(burial, process(repair: true), .running, progress: 0.31)
-        repair.statusText = "Repairing"
-        return [repair, job(bicep, process(repair: false, stems: true), .queued)]
+    /// Three selected: one running, one waiting, one finished.
+    var multiJobs: [Job] {
+        var finished = job(floatingPoints, process(repair: false, stems: true), .finished, progress: 1)
+        finished.steps = [.normalize, .stems]
+        return sessionJobs + [finished]
     }
 
-    /// A normalize-only run beside a heavy one, one waiting.
-    var normalizeJobs: [Job] {
-        var normalizing = job(bicep, process(repair: false), .running, progress: 0.58)
-        normalizing.statusText = "Saving AIFF"
-        var separating = job(fred, process(repair: true, stems: true), .running, progress: 0.62)
-        separating.statusText = "Separating stems"
-        return [separating, normalizing, job(ross, process(repair: false), .queued)]
-    }
-
-    /// Everything the queue panel can show.
-    var queueJobs: [Job] {
-        var running = job(bicep, process(repair: true, stems: true), .running, progress: 0.42)
-        running.statusText = "Repairing"
-        return [job(floatingPoints, process(repair: false, normalize: false, stems: true, model: .htdemucsFT), .finished, progress: 1,
-                    result: URL.musicDirectory.appending(path: "DJ Tools/\(floatingPoints.name) (Stems)")),
-                job(ross, process(repair: true), .failed("Repair stopped: out of memory. Close other apps and try again.")),
-                job(kettama, .quality, .running),
-                running,
-                job(fred, process(repair: true), .queued),
-                job(overmono, process(repair: true, stems: true, model: .htdemucs6s), .queued)]
-    }
-
-    func model(tracks: [Track], jobs: [Job], apollo: DJApolloSetupState = .notInstalled, showsJobs: Bool = false,
+    func model(tracks: [Track], jobs: [Job], apollo: DJApolloSetupState = .notInstalled,
                settings: AppSettings? = nil) -> AppModel {
         let support = FileManager.default.temporaryDirectory.appending(path: "DJToolsPreviews")
         let model = AppModel(engines: .fake(supportDirectory: support), settings: settings ?? self.settings, store: nil)
-        model.installFixture(tracks: tracks, jobs: jobs, apolloState: apollo, showsJobs: showsJobs)
+        model.installFixture(tracks: tracks, jobs: jobs, apolloState: apollo)
         return model
     }
 }

@@ -34,7 +34,5 @@ enum DJSize {
     static let sidebarIdeal: CGFloat = 290
     static let sidebarMax: CGFloat = 380
     /// The detail column's widest measure.
-    static let detailMaxWidth: CGFloat = 820
-    /// The job queue panel at the window's right edge.
-    static let jobsPanelWidth: CGFloat = 320
+    static let detailMaxWidth: CGFloat = 760
 }

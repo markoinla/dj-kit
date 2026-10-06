@@ -36,6 +36,12 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     /// "mp3", "flac", …
     var container: String { url.pathExtension.lowercased() }
     var verdict: DJQualityVerdict? { quality?.verdict }
+    /// "MP3 128", "FLAC": the file type, with the bitrate when lossy.
+    var formatLabel: String {
+        let type = DJFormat.container(container)
+        guard let quality, !quality.isLosslessContainer, let kbps = quality.declaredBitrateKbps else { return type }
+        return "\(type) \(kbps)"
+    }
 
     /// Lossy-sounding audio: Apollo is the suggested tool.
     var needsRepair: Bool {
@@ -53,6 +59,13 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
 
     var fileExists: Bool { FileCheck.exists(url) }
 
+    /// The latest result as Process files (an older one-tool result too).
+    var latestResult: (result: TrackResult, files: ProcessedFiles)? {
+        results.last.map { ($0, $0.kind.files) }
+    }
+
+    var latestFiles: ProcessedFiles? { latestResult?.files }
+
     /// A match waiting for Apply or Not This Track.
     var hasPendingIdentity: Bool { identity != nil && identityStatus == nil }
 
@@ -64,6 +77,16 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     }
 
     static let supportedExtensions: Set<String> = ["mp3", "m4a", "aac", "flac", "wav", "aiff", "aif"]
+}
+
+/// Where a track stands, for the sidebar's groups and the detail pane.
+enum TrackStage: Sendable {
+    /// A Process run is queued or running.
+    case processing
+    /// Not processed yet, or the last run failed.
+    case ready
+    /// The latest result is there.
+    case done
 }
 
 /// What happened to a Track ID match.
@@ -93,6 +116,17 @@ struct TrackResult: Identifiable, Codable, Sendable, Equatable {
         case stems(model: DJStemModel, folder: URL, stems: [String: URL])
         case repaired(output: URL, normalization: DJNormalizationPlan? = nil)
         case normalized(output: URL, plan: DJNormalizationPlan)
+
+        /// The same files as a Process run's.
+        var files: ProcessedFiles {
+            switch self {
+            case .processed(let files): files
+            case .stems(let model, let folder, let stems):
+                ProcessedFiles(repaired: false, stemModel: model, stemsFolder: folder, stems: stems)
+            case .repaired(let output, let plan): ProcessedFiles(output: output, repaired: true, normalization: plan)
+            case .normalized(let output, let plan): ProcessedFiles(output: output, repaired: false, normalization: plan)
+            }
+        }
     }
 
     var id: UUID = UUID()

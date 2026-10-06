@@ -34,6 +34,8 @@ struct WelcomeContent: View {
                     .buttonStyle(.dj(.primary))
             }
             HStack(spacing: DJSpace.sm) {
+                step("waveform.badge.magnifyingglass", "Analyze")
+                arrow
                 step("wand.and.stars", "Repair")
                 arrow
                 step("speaker.wave.2", "Normalize")

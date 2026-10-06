@@ -1,24 +1,25 @@
 import AppKit
 import SwiftUI
 
-/// The sidebar: the wordmark, the dropped tracks (multi-select), and the
-/// running heavy job at the foot.
+/// The sidebar: the wordmark and the dropped tracks (multi-select), in
+/// three groups: Processing, Ready and Done.
 struct TrackSidebar: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: Set<Track.ID>
 
     var body: some View {
+        let groups = model.trackGroups
         List(selection: $selection) {
-            if !model.tracks.isEmpty {
+            ForEach(Array(groups.enumerated()), id: \.element.stage) { index, group in
                 Section {
-                    ForEach(model.tracks) { track in
-                        TrackRow(track: track, job: model.activeJob(for: track.id))
+                    ForEach(group.tracks) { track in
+                        SidebarTrackRow(track: track, stage: group.stage)
                             .tag(track.id)
                             .contextMenu { TrackMenu(ids: menuTargets(track.id), selection: $selection) }
                     }
                 } header: {
-                    SidebarHeader(title: "Tracks", count: model.tracks.count) {
-                        if model.tracks.contains(where: { !$0.fileExists }) {
+                    SidebarHeader(title: group.stage.title, count: group.tracks.count) {
+                        if index == 0, model.tracks.contains(where: { !$0.fileExists }) {
                             DJLinkButton("Remove Missing") {
                                 model.remove(Set(model.tracks.filter { !$0.fileExists }.map(\.id)))
                             }
@@ -40,13 +41,6 @@ struct TrackSidebar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DJColor.sidebar)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let job = model.runningHeavyJob {
-                SidebarActivityCard(job: job, waiting: model.activeHeavyJobs.count - 1) {
-                    model.isShowingJobs = true
-                }
-            }
-        }
         .overlay {
             if model.tracks.isEmpty {
                 VStack(spacing: DJSpace.xs) {
@@ -60,6 +54,29 @@ struct TrackSidebar: View {
     /// A right-click on a selected row acts on the whole selection.
     private func menuTargets(_ id: Track.ID) -> [Track.ID] {
         selection.contains(id) ? model.tracks.map(\.id).filter(selection.contains) : [id]
+    }
+}
+
+/// `TrackRow` fed from the model (also drawn by `-renderPreviews`).
+struct SidebarTrackRow: View {
+    @Environment(AppModel.self) private var model
+    let track: Track
+    let stage: TrackStage
+
+    var body: some View {
+        TrackRow(track: track, stage: stage, job: model.processJob(for: track.id),
+                 isChecking: model.job(for: track.id, kind: .quality)?.state.isActive == true)
+    }
+}
+
+extension TrackStage {
+    /// The sidebar group's label.
+    var title: String {
+        switch self {
+        case .processing: "Processing"
+        case .ready: "Ready"
+        case .done: "Done"
+        }
     }
 }
 
@@ -107,52 +124,6 @@ extension SidebarHeader where Trailing == EmptyView {
     }
 }
 
-/// The heavy job that's running, at the sidebar's foot. Click for the queue.
-struct SidebarActivityCard: View {
-    let job: Job
-    let waiting: Int
-    var open: () -> Void = {}
-
-    var body: some View {
-        Button(action: open) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: job.kind.systemImage)
-                        .font(.system(size: 11))
-                        .foregroundStyle(DJColor.ring)
-                    Text(job.statusText ?? "Processing")
-                        .djText(.captionMedium)
-                        .foregroundStyle(DJColor.foreground)
-                    Spacer(minLength: 0)
-                    Text(job.progress.map(DJFormat.percent) ?? "")
-                        .djText(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(DJColor.mutedForeground)
-                }
-                Text(job.trackName)
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                DJProgressBar(fraction: job.progress, height: 3, tint: DJColor.ring)
-                if waiting > 0 {
-                    Text("\(waiting) more waiting")
-                        .djText(.caption)
-                        .foregroundStyle(DJColor.mutedForeground)
-                }
-            }
-            .padding(DJSpace.md)
-            .background(DJColor.background, in: RoundedRectangle(cornerRadius: DJRadius.lg))
-            .overlay(RoundedRectangle(cornerRadius: DJRadius.lg).strokeBorder(DJColor.border))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(DJSpace.md)
-        .background(DJColor.sidebar)
-        .help("Show the queue")
-    }
-}
-
 /// Right-click on tracks (all the selected ones when the row is selected).
 struct TrackMenu: View {
     @Environment(AppModel.self) private var model
@@ -160,14 +131,15 @@ struct TrackMenu: View {
     @Binding var selection: Set<Track.ID>
 
     var body: some View {
-        Button(ids.count > 1 ? "Identify \(ids.count) Tracks" : "Identify Track") { model.identify(ids) }
+        let identified = ids.allSatisfy { model.track($0)?.identifiedAt != nil }
+        Button(ids.count > 1 ? "Identify \(ids.count) Tracks" : identified ? "Identify Again" : "Identify") { model.identify(ids) }
         let pending = ids.filter { model.track($0)?.hasPendingIdentity == true }
         if !pending.isEmpty {
             Button(pending.count > 1 ? "Apply \(pending.count) Track IDs" : "Apply Track ID") { model.applyIdentity(pending) }
         }
         Divider()
         Button(ids.count > 1 ? "Process \(ids.count) Tracks…" : "Process…") {
-            model.processRequest = ProcessRequest(trackIDs: ids)
+            selection = Set(ids)
         }
         Button("Check Quality Again") { model.checkQuality(ids) }
         Divider()

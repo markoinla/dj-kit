@@ -47,6 +47,24 @@ match, title unsuffixed on the finished track (" (Vocals)" … on stems), and
 The scratch folder is deleted however the run ends. The last run's steps and
 format are remembered (`AppSettings.lastRecipe`).
 
+Besides the run's overall `progress`, `process` reports the running step and its
+own fraction (`step: (ProcessStep, Double)`, through the main queue, never
+backwards); saving the finished track counts as Normalize (Repair when it
+doesn't normalize), mixing and saving stems as Stems (~30 % of that step for
+lossless, more for MP3). `AppModel` keeps them on the `Job` (`steps`,
+`currentStep`, `stepProgress`) for the stepper; the sidebar row shows the
+overall bar.
+
+## The window
+
+No sheets or queue panel: dropping (or ⌘O) adds and selects tracks, and the
+detail pane is a stepper — ① Analyze (quality check + Track ID, automatic on
+drop; BPM/key will go here) → ② Repair → ③ Normalize → ④ Stems — in setup,
+processing or done state, all derived from the track's jobs and results
+(`AppModel.stage(of:)`, `TrackStage`). The sidebar groups tracks the same
+way (Processing / Ready / Done). Finished files are draggable straight into
+Rekordbox.
+
 `Engines.real(supportDirectory:)` builds them; `supportDirectory` is
 `AppPaths.support` (`~/Library/Application Support/DJTools`, or
 `-supportDirectory <path>`).
@@ -92,7 +110,8 @@ htdemucs stems unless `-selfTestSkipStems`, saved as `-selfTestFormat`
 (default aiff); each output is decoded again and its rate, length and tags
 checked (the finished track's title must be the source's, unsuffixed). A normalized output is also measured again with LoudnessKit and
 must land within ±0.2 LU of the target, or on the ceiling (±0.1 dB) when the
-plan was capped. Prints one
+plan was capped. The step callbacks must enter each of the run's steps once,
+in order. Prints one
 JSON object (timings, outputs, callback counts and whether any arrived off
 the main thread) and exits 0/1. Works in Release, no GUI
 session needed; `-supportDirectory` keeps the models out of
