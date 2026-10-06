@@ -6,7 +6,8 @@
 Everything is decoded with PyAV to 44.1 kHz stereo, aligned to the FLAC by cross-correlation
 (decoders and resamplers add different delays), and trimmed to a common length. Reports per
 file: energy above 16 kHz relative to the FLAC (dB), log-spectral distance to the FLAC over
-the full band and over 16-22 kHz (LSD, dB; lower is better), and SNR to the FLAC.
+the full band and over 16-22 kHz (LSD, dB; lower is better), and SNR to the FLAC over the full
+band and below 8 kHz (where the codec kept the signal, so a repair should not lose any).
 Optionally --pair A B prints the SNR between two outputs (e.g. Swift vs Python).
 """
 import argparse
@@ -50,6 +51,13 @@ def spec(x, n=2048, hop=512):
     return np.abs(np.fft.rfft(frames, axis=-1)) ** 2  # ch, T, F
 
 
+def lowpass(x, cutoff=8000):
+    """Brick-wall low-pass (whole-signal FFT), for SNR in the band the lossy codec kept."""
+    X = np.fft.rfft(x, axis=-1)
+    X[..., np.fft.rfftfreq(x.shape[-1], 1 / SR) > cutoff] = 0
+    return np.fft.irfft(X, n=x.shape[-1], axis=-1)
+
+
 def report(name, ref, x):
     n = min(ref.shape[1], x.shape[1])
     r, y = ref[:, :n], x[:, :n]
@@ -64,7 +72,9 @@ def report(name, ref, x):
     lsd = np.sqrt((d ** 2).mean(-1))[loud].mean()
     lsd_hb = np.sqrt((d[..., hb] ** 2).mean(-1))[loud].mean()
     snr = 10 * np.log10((r ** 2).sum() / ((r - y) ** 2).sum())
-    print(f"{name:40s} HF>16k {e_hb:+7.1f} dB | LSD {lsd:5.2f} dB | LSD 16-22k {lsd_hb:5.2f} dB | SNR {snr:5.1f} dB")
+    rl, yl = lowpass(r), lowpass(y)
+    snr_lo = 10 * np.log10((rl ** 2).sum() / ((rl - yl) ** 2).sum())
+    print(f"{name:40s} HF>16k {e_hb:+7.1f} dB | LSD {lsd:5.2f} dB | LSD 16-22k {lsd_hb:5.2f} dB | SNR {snr:5.1f} dB | SNR<8k {snr_lo:5.1f} dB")
 
 
 def main():
