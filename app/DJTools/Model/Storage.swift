@@ -1,3 +1,4 @@
+import AudioExport
 import Foundation
 import Observation
 
@@ -58,6 +59,8 @@ final class AppSettings {
     private enum Key {
         static let outputFolder = "outputFolder"
         static let defaultStemModel = "defaultStemModel"
+        static let stemsFormat = "stemsFormat"
+        static let repairFormat = "repairFormat"
     }
 
     var outputFolder: URL {
@@ -68,6 +71,19 @@ final class AppSettings {
         didSet { defaults.set(defaultStemModel.rawValue, forKey: Key.defaultStemModel) }
     }
 
+    /// The file type stems are saved as, unless a job picks another.
+    var stemsFormat: AudioFileFormat {
+        didSet { defaults.set(stemsFormat.rawValue, forKey: Key.stemsFormat) }
+    }
+
+    /// The file type Apollo repairs are saved as, unless a job picks another.
+    var repairFormat: AudioFileFormat {
+        didSet { defaults.set(repairFormat.rawValue, forKey: Key.repairFormat) }
+    }
+
+    /// AIFF: lossless, and Rekordbox reads its tags and artwork.
+    static let defaultFormat = AudioFileFormat.aiff
+
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -75,6 +91,8 @@ final class AppSettings {
         outputFolder = defaults.string(forKey: Key.outputFolder).map { URL(filePath: $0, directoryHint: .isDirectory) }
             ?? AppPaths.defaultOutputFolder
         defaultStemModel = defaults.string(forKey: Key.defaultStemModel).flatMap(DJStemModel.init) ?? .htdemucs
+        stemsFormat = defaults.string(forKey: Key.stemsFormat).flatMap(AudioFileFormat.init) ?? Self.defaultFormat
+        repairFormat = defaults.string(forKey: Key.repairFormat).flatMap(AudioFileFormat.init) ?? Self.defaultFormat
     }
 
     var isDefaultOutputFolder: Bool {

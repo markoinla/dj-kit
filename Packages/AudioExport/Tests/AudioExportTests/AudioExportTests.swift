@@ -135,9 +135,11 @@ struct AudioExportTests {
     #expect(read == Self.tags, "read back \(read)")
   }
 
-  @Test func mp3From48kIsResampledTo44k() async throws {
-    let source = try Synth.wav24(in: dir, seconds: 2, sampleRate: 48_000)
-    let out = dir.appendingPathComponent("48k.mp3")
+  /// 48 kHz down, and 24 kHz up (a 64 kbps MP3's stems): both come out 44.1 kHz.
+  @Test(arguments: [48_000.0, 24_000.0, 22_050.0])
+  func mp3IsResampledTo44k(rate: Double) async throws {
+    let source = try Synth.wav24(in: dir, seconds: 2, sampleRate: rate)
+    let out = dir.appendingPathComponent("\(Int(rate)).mp3")
     _ = try await AudioExporter.export(source, to: out, format: .mp3_320)
     let b = try Decoded(out)
     #expect(b.sampleRate == 44_100)

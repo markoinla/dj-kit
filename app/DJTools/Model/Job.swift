@@ -1,3 +1,4 @@
+import AudioExport
 import Foundation
 
 /// One run of a tool on one track. Quality checks are cheap and run side by
@@ -45,6 +46,8 @@ struct Job: Identifiable, Equatable, Sendable {
     let trackID: Track.ID
     let trackName: String
     let kind: Kind
+    /// The file type stems and repairs are saved as (nil for quality checks).
+    let format: AudioFileFormat?
     var state: State = .queued
     /// 0…1 while running, when the engine reports it.
     var progress: Double?
@@ -53,12 +56,20 @@ struct Job: Identifiable, Equatable, Sendable {
     var statusText: String?
     let createdAt: Date
 
-    init(trackID: Track.ID, trackName: String, kind: Kind, id: UUID = UUID(), createdAt: Date = Date()) {
+    init(trackID: Track.ID, trackName: String, kind: Kind, format: AudioFileFormat? = nil,
+         id: UUID = UUID(), createdAt: Date = Date()) {
         self.id = id
         self.trackID = trackID
         self.trackName = trackName
         self.kind = kind
+        self.format = kind == .quality ? nil : format
         self.createdAt = createdAt
+    }
+
+    /// "Stems · htdemucs · AIFF", "Apollo repair · MP3 320".
+    var title: String {
+        guard let format else { return kind.title }
+        return "\(kind.title) · \(format.shortTitle)"
     }
 
     /// The row's status line: "Queued", "Separating · 42%", "Done", the error.

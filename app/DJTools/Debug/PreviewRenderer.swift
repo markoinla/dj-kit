@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import AudioExport
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -26,6 +27,8 @@ enum PreviewRenderer {
         let installing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs,
                                         apollo: .installing("Installing PyTorch and dependencies… 42%"))
         let repairing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.repairJobs, apollo: .ready, showsJobs: true)
+        // Settings say stems as FLAC and repairs as MP3 320: the format menus and the MP3 hint.
+        let repairAsMP3 = fixtures.model(tracks: fixtures.tracks, jobs: [], apollo: .ready, settings: fixtures.mp3Settings)
 
         var shots: [(String, AnyView)] = [
             ("01-welcome", AnyView(PreviewWindow(model: empty, selection: []))),
@@ -39,10 +42,12 @@ enum PreviewRenderer {
                                                            sheet: AnyView(ApolloSetupContent(state: installing.apolloState, trackCount: 1))))),
             ("08-track-checking", AnyView(PreviewWindow(model: busy, selection: [fixtures.kettama.id]))),
             ("09-track-very-low-source", AnyView(PreviewWindow(model: repairing, selection: [fixtures.burial.id]))),
+            ("10-track-repair-as-mp3", AnyView(PreviewWindow(model: repairAsMP3, selection: [fixtures.bicep.id]))),
         ]
         shots.append(contentsOf: [
             ("11-dark-track-low-quality", AnyView(PreviewWindow(model: busy, selection: [fixtures.overmono.id]))),
             ("12-dark-queue", AnyView(PreviewWindow(model: queue, selection: [fixtures.bicep.id]))),
+            ("14-dark-track-repair-as-mp3", AnyView(PreviewWindow(model: repairAsMP3, selection: [fixtures.bicep.id]))),
             ("13-dark-welcome", AnyView(PreviewWindow(model: empty, selection: []))),
         ])
 
@@ -210,10 +215,15 @@ struct PreviewFixtures {
     let bicep: Track
     let burial: Track
     let settings = AppSettings(defaults: UserDefaults(suiteName: "la.marko.djtools.previews")!)
+    let mp3Settings = AppSettings(defaults: UserDefaults(suiteName: "la.marko.djtools.previews.mp3")!)
 
     var tracks: [Track] { [floatingPoints, overmono, fred, ross, kettama, bicep, burial] }
 
     init() {
+        settings.stemsFormat = .aiff
+        settings.repairFormat = .aiff
+        mp3Settings.stemsFormat = .flac
+        mp3Settings.repairFormat = .mp3_320
         let folder = URL.musicDirectory.appending(path: "Promos/October 2026", directoryHint: .isDirectory)
         let now = Date()
         func track(_ file: String, _ verdict: DJQualityVerdict?, bitrate: Int?, cutoff: Double?, duration: TimeInterval,
@@ -237,7 +247,7 @@ struct PreviewFixtures {
         fp.results = [
             TrackResult(kind: .stems(model: .htdemucsFT, folder: stemsFolder,
                                      stems: Dictionary(uniqueKeysWithValues: DJStemModel.htdemucsFT.stemNames.map {
-                                         ($0, stemsFolder.appending(path: "\($0).wav"))
+                                         ($0, stemsFolder.appending(path: "\($0).aiff"))
                                      })),
                         finishedAt: now.addingTimeInterval(-3_600)),
         ]
@@ -257,7 +267,7 @@ struct PreviewFixtures {
     }
 
     private func job(_ track: Track, _ kind: Job.Kind, _ state: Job.State, progress: Double? = nil, result: URL? = nil) -> Job {
-        var job = Job(trackID: track.id, trackName: track.name, kind: kind)
+        var job = Job(trackID: track.id, trackName: track.name, kind: kind, format: .aiff)
         job.state = state
         job.progress = progress
         job.resultURL = result
@@ -290,9 +300,10 @@ struct PreviewFixtures {
          job(overmono, .stems(.htdemucs6s), .queued)]
     }
 
-    func model(tracks: [Track], jobs: [Job], apollo: DJApolloSetupState = .notInstalled, showsJobs: Bool = false) -> AppModel {
+    func model(tracks: [Track], jobs: [Job], apollo: DJApolloSetupState = .notInstalled, showsJobs: Bool = false,
+               settings: AppSettings? = nil) -> AppModel {
         let support = FileManager.default.temporaryDirectory.appending(path: "DJToolsPreviews")
-        let model = AppModel(engines: .fake(supportDirectory: support), settings: settings, store: nil)
+        let model = AppModel(engines: .fake(supportDirectory: support), settings: settings ?? self.settings, store: nil)
         model.installFixture(tracks: tracks, jobs: jobs, apolloState: apollo, showsJobs: showsJobs)
         return model
     }

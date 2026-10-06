@@ -171,7 +171,7 @@ struct JobRow: View {
                     .foregroundStyle(DJColor.foreground)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(showsTrack ? "\(job.kind.title) · \(job.statusLine)" : job.statusLine)
+                Text(showsTrack ? "\(job.title) · \(job.statusLine)" : job.statusLine)
                     .djText(.caption)
                     .foregroundStyle(isFailed ? DJColor.destructive : DJColor.mutedForeground)
                     .monospacedDigit()

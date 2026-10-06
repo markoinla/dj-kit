@@ -33,6 +33,11 @@ enum Credits {
             url: URL(string: "https://github.com/ml-explore/mlx-swift")!
         ),
         Credit(
+            name: "LAME", license: "LGPL-2.0",
+            detail: "MP3 encoder (libmp3lame 3.100), by the LAME project. Ships unmodified; its source and licence are in Packages/AudioExport.",
+            url: URL(string: "https://lame.sourceforge.io")!
+        ),
+        Credit(
             name: "Manrope", license: "SIL OFL 1.1",
             detail: "Typeface by Mikhail Sharanda.",
             url: URL(string: "https://github.com/sharanda/manrope")!
