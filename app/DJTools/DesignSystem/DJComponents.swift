@@ -509,3 +509,34 @@ enum DJFormat {
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 }
+
+// MARK: - Switch
+
+/// A small on/off switch drawn in SwiftUI (so `-renderPreviews` can draw it
+/// too): the ring colour when on, muted when off. Click anywhere on it.
+struct DJSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                Capsule()
+                    .fill(configuration.isOn ? DJColor.ring : DJColor.foreground.opacity(0.14))
+                    .frame(width: 30, height: 18)
+                Circle()
+                    .fill(Color.white)
+                    .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
+                    .frame(width: 14, height: 14)
+                    .padding(2)
+            }
+            .animation(.snappy(duration: 0.15), value: configuration.isOn)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityRepresentation { Toggle(isOn: configuration.$isOn) { configuration.label } }
+    }
+}
+
+extension ToggleStyle where Self == DJSwitchStyle {
+    static var djSwitch: DJSwitchStyle { DJSwitchStyle() }
+}

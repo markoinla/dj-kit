@@ -23,9 +23,6 @@ struct TrackIDSection: View {
         if job?.state.isActive == true {
             VStack(alignment: .leading, spacing: DJSpace.sm) {
                 Text("Listening…").djText(.bodyMedium).foregroundStyle(DJColor.foreground)
-                Text("Shazam listens to three short bits; Apple Music fills in the album, label and artwork.")
-                    .djText(.caption)
-                    .foregroundStyle(DJColor.mutedForeground)
                 DJProgressBar(fraction: job?.progress, height: 4)
                     .frame(maxWidth: 240)
                     .padding(.top, 2)
@@ -33,21 +30,19 @@ struct TrackIDSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .djCard(padding: DJSpace.lg)
         } else if let error = track.identifyError {
-            DJNotice(kind: .error, message: "Couldn't identify this track: \(error)")
+            DJNotice(kind: .error, message: "Couldn't identify: \(error)")
         } else if let identity = track.identity, track.identityStatus != .dismissed {
             IdentityCard(track: track, identity: identity, applying: model.applying.contains(track.id),
                          renames: model.settings.renameOnApply)
         } else if track.identifiedAt != nil {
-            Text(track.identityStatus == .dismissed
-                 ? "Match turned down. The file keeps its own tags."
-                 : "No match. Shazam doesn't know this one (promos and white labels often aren't in its catalog).")
+            Text(track.identityStatus == .dismissed ? "Match turned down" : "No match")
                 .djText(.body)
                 .foregroundStyle(DJColor.mutedForeground)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .djCard(padding: DJSpace.lg)
         } else {
             HStack {
-                Text("Not identified yet.")
+                Text("Not identified")
                     .djText(.body)
                     .foregroundStyle(DJColor.mutedForeground)
                 Spacer()
@@ -92,7 +87,7 @@ private struct IdentityCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     HStack(spacing: DJSpace.md) {
-                        Text("Heard in \(identity.hits) of \(identity.listens) listens")
+                        Text("\(identity.hits)/\(identity.listens) listens")
                         if let url = identity.appleMusicURL { Link("Apple Music", destination: url) }
                         if let url = identity.shazamURL { Link("Shazam", destination: url) }
                     }
@@ -104,7 +99,7 @@ private struct IdentityCard: View {
             .padding(DJSpace.lg)
 
             if track.identityLengthMismatch, let expected = identity.durationSeconds, let actual = track.quality?.duration {
-                Label("Apple Music's release is \(DJFormat.duration(expected)); this file is \(DJFormat.duration(actual)). Probably another mix or edit; the tags are still the song's.",
+                Label("Release is \(DJFormat.duration(expected)), file is \(DJFormat.duration(actual)): maybe another mix",
                       systemImage: "exclamationmark.triangle")
                     .djText(.caption)
                     .foregroundStyle(DJColor.marker)
@@ -112,7 +107,7 @@ private struct IdentityCard: View {
                     .padding(.horizontal, DJSpace.lg)
                     .padding(.bottom, DJSpace.md)
             } else if !identity.isStrong, !isApplied {
-                Label("Only one listen matched, so check it's right before applying.", systemImage: "questionmark.circle")
+                Label("Weak match", systemImage: "questionmark.circle")
                     .djText(.caption)
                     .foregroundStyle(DJColor.mutedForeground)
                     .padding(.horizontal, DJSpace.lg)
@@ -158,8 +153,7 @@ private struct IdentityCard: View {
 
     private var applyNote: String {
         let name = TrackTags.fileName("\(identity.artist) - \(identity.title)") + "." + track.url.pathExtension
-        let tags = "Writes the tags and artwork into the file (no re-encoding)"
-        return renames && name != track.url.lastPathComponent ? "\(tags) and renames it “\(name)”." : "\(tags)."
+        return renames && name != track.url.lastPathComponent ? "Tags + rename to “\(name)”" : "Writes tags + artwork"
     }
 }
 

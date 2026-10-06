@@ -14,16 +14,22 @@ struct ApolloSetupRequest: Identifiable, Equatable {
     var trackIDs: [Track.ID]
 }
 
+/// The Process sheet (after a drop, or "Process…" on tracks).
+struct ProcessRequest: Identifiable, Equatable {
+    let id = UUID()
+    var trackIDs: [Track.ID]
+}
+
 /// The app's state: dropped tracks, the job queue and Apollo's setup.
 ///
 /// Jobs: quality checks start straight away, up to `maxConcurrentChecks`
-/// at once. Loudness measuring and normalizing decode (and normalizing
-/// re-encodes) the whole file but need little memory: up to
-/// `maxConcurrentDecodes` at once, beside everything else. Stems and Apollo repairs are heavy (each peaks around 6 GB) and
-/// run strictly one at a time *across both kinds*, in the order they were
-/// asked for: `heavyInFlight` is a single slot shared by every heavy job and
-/// is only released when the job's task has returned, so a cancelled job
-/// still holds it until its engine has actually stopped.
+/// at once. Loudness measuring and normalize-only Process runs decode the
+/// whole file but need little memory: up to `maxConcurrentDecodes` at once,
+/// beside everything else. A Process run that repairs or separates is heavy
+/// (Apollo and Demucs each peak around 3–6 GB, one after the other inside the
+/// run) and runs strictly one at a time, in the order asked for:
+/// `heavyInFlight` is a single slot only released when the job's task has
+/// returned, so a cancelled job still holds it until its engine has stopped.
 @MainActor
 @Observable
 final class AppModel {
@@ -32,6 +38,8 @@ final class AppModel {
     private(set) var apolloState: DJApolloSetupState = .notInstalled
     /// Drives the Apollo setup sheet.
     var apolloSetup: ApolloSetupRequest?
+    /// Drives the Process sheet.
+    var processRequest: ProcessRequest?
     /// The job queue panel at the window's right edge.
     var isShowingJobs = false
     /// A one-line message for the window ("Nothing to add…").
@@ -53,9 +61,8 @@ final class AppModel {
     /// The heavy job whose task is still running (it may already read as
     /// cancelled while its engine winds down).
     @ObservationIgnored private var heavyInFlight: Job.ID?
-    /// Repairs waiting for Apollo's setup to finish, and the file type they asked for.
-    @ObservationIgnored private var pendingRepairs: [Track.ID] = []
-    @ObservationIgnored private var pendingRepairFormat: AudioFileFormat?
+    /// Process runs waiting for Apollo's setup to finish.
+    @ObservationIgnored private var pendingProcess: [(id: Track.ID, recipe: ProcessRecipe, target: DJLoudnessTarget)] = []
 
     init(engines: Engines, settings: AppSettings, store: LibraryStore?) {
         self.engines = engines
@@ -134,7 +141,7 @@ final class AppModel {
         }
         tracks.removeAll { ids.contains($0.id) }
         jobs.removeAll { ids.contains($0.trackID) && !$0.state.isActive }
-        pendingRepairs.removeAll { ids.contains($0) }
+        pendingProcess.removeAll { ids.contains($0.id) }
         save()
     }
 
@@ -155,15 +162,6 @@ final class AppModel {
             updateTrack(id) { $0.qualityError = nil }
             enqueue(.quality, for: id)
         }
-    }
-
-    /// Separates stems, keeping `choice` (Settings' when nil), saved as
-    /// `format` (Settings' choice when nil).
-    func separateStems(_ ids: [Track.ID], model: DJStemModel, choice: DJStemChoice? = nil, format: AudioFileFormat? = nil) {
-        let format = format ?? settings.stemsFormat
-        let choice = choice ?? settings.stemChoice
-        for id in ids { enqueue(.stems(model, choice), for: id, format: format) }
-        if !ids.isEmpty { isShowingJobs = true }
     }
 
     // MARK: - Track ID
@@ -226,22 +224,33 @@ final class AppModel {
         for id in ids { updateTrack(id) { $0.identityStatus = .dismissed } }
     }
 
-    /// Saves a copy of each track at Settings' target loudness (pure gain,
-    /// capped by the true-peak ceiling) as `format` (Settings' choice when nil).
-    func normalize(_ ids: [Track.ID], format: AudioFileFormat? = nil) {
-        let format = format ?? settings.normalizeFormat
+    /// Runs `recipe` on each track: repair → normalize → stems, saved once.
+    /// Remembers it for next time (Repair goes back to the suggestion). When
+    /// a track will be repaired and Apollo isn't set up, asks for that first.
+    func process(_ ids: [Track.ID], recipe: ProcessRecipe) {
+        var remembered = recipe
+        remembered.repair = .suggested
+        settings.lastRecipe = remembered
         let target = settings.loudnessTarget
-        for id in ids { enqueue(.normalize(target), for: id, format: format) }
-        if !ids.isEmpty { isShowingJobs = true }
+        let runs = ids.compactMap { id in track(id).map { (id: id, recipe: recipe.resolved(for: $0), target: target) } }
+        guard !runs.isEmpty else { return }
+        let needsApollo = runs.contains { $0.recipe.repair != .off }
+        if needsApollo, apolloState != .ready {
+            pendingProcess.removeAll { run in runs.contains { $0.id == run.id } }
+            pendingProcess += runs
+            apolloSetup = ApolloSetupRequest(trackIDs: pendingProcess.map(\.id))
+            return
+        }
+        for run in runs { enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format) }
+        isShowingJobs = true
     }
 
-    /// Measures loudness for the Normalize card, once per track (not again
+    /// Measures loudness for the Normalize row, once per track (not again
     /// after a failure until asked).
     func measureLoudnessIfNeeded(_ ids: [Track.ID]) {
         for id in ids {
             guard let track = track(id), track.loudness == nil, track.loudnessError == nil, track.fileExists,
-                  job(for: id, kind: .loudness)?.state.isActive != true,
-                  job(for: id, kind: .normalize(settings.loudnessTarget))?.state.isActive != true
+                  job(for: id, kind: .loudness)?.state.isActive != true
             else { continue }
             enqueue(.loudness, for: id)
         }
@@ -250,26 +259,6 @@ final class AppModel {
     func measureLoudnessAgain(_ id: Track.ID) {
         updateTrack(id) { $0.loudness = nil; $0.loudnessError = nil }
         enqueue(.loudness, for: id)
-    }
-
-    /// Repairs with Apollo, saved as `format` (Settings' choice when nil), or
-    /// first asks to set Apollo up.
-    func repair(_ ids: [Track.ID], format: AudioFileFormat? = nil) {
-        guard !ids.isEmpty else { return }
-        let format = format ?? settings.repairFormat
-        switch apolloState {
-        case .ready:
-            for id in ids { enqueue(.repair, for: id, format: format) }
-            isShowingJobs = true
-        case .installing:
-            pendingRepairs.append(contentsOf: ids.filter { !pendingRepairs.contains($0) })
-            pendingRepairFormat = format
-            apolloSetup = ApolloSetupRequest(trackIDs: pendingRepairs)
-        case .notInstalled, .failed:
-            pendingRepairs = ids
-            pendingRepairFormat = format
-            apolloSetup = ApolloSetupRequest(trackIDs: ids)
-        }
     }
 
     // MARK: - Jobs
@@ -308,7 +297,7 @@ final class AppModel {
         jobs[index].progress = nil
         if wasRunning {
             tasks[id]?.cancel()
-            if jobs[index].kind == .repair {
+            if case .process(let recipe, _) = jobs[index].kind, recipe.repair != .off {
                 let apollo = engines.apollo
                 Task { await apollo.cancel() }
             }
@@ -328,11 +317,10 @@ final class AppModel {
         guard let job = jobs.first(where: { $0.id == id }) else { return }
         jobs.removeAll { $0.id == id }
         switch job.kind {
-        case .repair: repair([job.trackID], format: job.format)
         case .quality: checkQuality([job.trackID])
         case .identify: identify([job.trackID])
         case .loudness: measureLoudnessAgain(job.trackID)
-        case .stems, .normalize: enqueue(job.kind, for: job.trackID, format: job.format)
+        case .process: enqueue(job.kind, for: job.trackID, format: job.format)
         }
     }
 
@@ -436,53 +424,36 @@ final class AppModel {
                     applyIdentity([track.id])
                 }
 
-            case .stems(let model, let choice):
-                let output = try outputFolder()
-                let result = try await ResultWriter.separate(
-                    input: track.url, model: model, choice: choice, format: job.format ?? settings.stemsFormat,
-                    tags: await TrackTags.forResults(track),
-                    outputFolder: output, engine: engines.stems, progress: progress, status: status
-                )
-                guard isRunning(job.id) else { return }
-                let folder = result.stems.values.first?.deletingLastPathComponent()
-                    ?? output.appending(path: "\(track.name) (Stems)", directoryHint: .isDirectory)
-                updateTrack(track.id) {
-                    $0.results.append(TrackResult(kind: .stems(model: model, folder: folder, stems: result.stems)))
-                }
-                finish(job.id, .finished, result: folder)
-
-            case .repair:
-                let normalize = settings.normalizeRepairs
-                    ? ResultWriter.NormalizeStep(target: settings.loudnessTarget, meter: engines.loudness) : nil
-                let saved = try await ResultWriter.repair(
-                    input: track.url, format: job.format ?? settings.repairFormat,
-                    tags: await TrackTags.forResults(track), outputFolder: try outputFolder(), engine: engines.apollo, normalize: normalize,
-                    progress: progress, status: status
-                )
-                guard isRunning(job.id) else { return }
-                updateTrack(track.id) {
-                    $0.results.append(TrackResult(kind: .repaired(output: saved.url, normalization: saved.plan)))
-                }
-                finish(job.id, .finished, result: saved.url)
-
             case .loudness:
                 let report = try await engines.loudness.measure(track.url, progress: progress)
                 guard isRunning(job.id) else { return }
                 updateTrack(track.id) { $0.loudness = report; $0.loudnessError = nil }
                 finish(job.id, .finished)
 
-            case .normalize(let target):
-                let saved = try await ResultWriter.normalize(
-                    input: track.url, target: target, format: job.format ?? settings.normalizeFormat,
-                    tags: await TrackTags.forResults(track), outputFolder: try outputFolder(), engine: engines.loudness, progress: progress, status: status
+            case .process(let recipe, let target):
+                // The name and the repair suggestion come from Track ID and
+                // the quality check: let this track's finish first.
+                try await waitForChecks(track.id)
+                guard let current = self.track(track.id), isRunning(job.id) else { return }
+                let steps = ResultWriter.Steps(
+                    repair: recipe.repairs(current),
+                    normalize: recipe.normalize ? target : nil,
+                    stems: recipe.stems ? (recipe.stemModel, recipe.stemChoice) : nil
                 )
-                guard isRunning(job.id), let plan = saved.plan else { return }
+                guard !steps.isEmpty else { throw AppError("Nothing to do: no step is on.") }
+                if steps.repair, apolloState != .ready { throw AppError("Repair isn't set up yet.") }
+                let processed = try await ResultWriter.process(
+                    input: current.url, steps: steps, format: job.format ?? recipe.format,
+                    tags: await TrackTags.forResults(current), outputFolder: try outputFolder(), engines: engines,
+                    progress: progress, status: status
+                )
+                guard isRunning(job.id) else { return }
                 updateTrack(track.id) {
-                    $0.loudness = saved.loudness
-                    $0.loudnessError = nil
-                    $0.results.append(TrackResult(kind: .normalized(output: saved.url, plan: plan)))
+                    // Only the original's own measurement describes the original.
+                    if !steps.repair, let report = processed.loudness { $0.loudness = report; $0.loudnessError = nil }
+                    $0.results.append(TrackResult(kind: .processed(processed.files)))
                 }
-                finish(job.id, .finished, result: saved.url)
+                finish(job.id, .finished, result: processed.files.output ?? processed.files.stemsFolder)
             }
         } catch is CancellationError {
             finish(job.id, .cancelled)
@@ -493,6 +464,15 @@ final class AppModel {
             if job.kind == .loudness { updateTrack(track.id) { $0.loudnessError = message } }
             if job.kind == .identify { updateTrack(track.id) { $0.identifyError = message } }
             finish(job.id, .failed(message))
+        }
+    }
+
+    /// Waits while this track's quality check or Track ID is queued or
+    /// running, or its match is being written (that can rename the file).
+    private func waitForChecks(_ id: Track.ID) async throws {
+        while applying.contains(id)
+            || jobs.contains(where: { $0.trackID == id && ($0.kind == .quality || $0.kind == .identify) && $0.state.isActive }) {
+            try await Task.sleep(for: .milliseconds(250))
         }
     }
 
@@ -543,17 +523,21 @@ final class AppModel {
                 return
             }
             guard apolloState == .ready else { return }
-            let waiting = pendingRepairs, format = pendingRepairFormat
-            pendingRepairs = []
-            pendingRepairFormat = nil
+            let waiting = pendingProcess
+            pendingProcess = []
             apolloSetup = nil
-            repair(waiting.filter { track($0) != nil }, format: format)
+            for run in waiting where track(run.id) != nil {
+                enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format)
+            }
+            if !waiting.isEmpty { isShowingJobs = true }
         }
     }
 
     /// Settings ▸ Remove Apollo Model: stops repairs and deletes the weights.
     func resetApollo() async {
-        for job in jobs where job.kind == .repair && job.state.isActive { cancel(job.id) }
+        for job in jobs where job.state.isActive {
+            if case .process(let recipe, _) = job.kind, recipe.repair != .off { cancel(job.id) }
+        }
         do {
             try await engines.apollo.reset()
         } catch {
@@ -565,7 +549,7 @@ final class AppModel {
     func dismissApolloSetup() {
         apolloSetup = nil
         // Not installing: the waiting repairs are dropped with the sheet.
-        if !apolloState.isInstalling { pendingRepairs = [] }
+        if !apolloState.isInstalling { pendingProcess = [] }
     }
 
     #if DEBUG

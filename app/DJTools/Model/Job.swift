@@ -1,32 +1,30 @@
 import AudioExport
 import Foundation
 
-/// One run of a tool on one track. Quality checks are cheap and run side by
-/// side; loudness measuring and normalizing decode the whole file and run two
-/// at a time; stems and Apollo repairs are heavy and run one at a time.
+/// One run of a tool on one track. Quality checks and Track ID are cheap and
+/// run side by side; a Process run that only normalizes decodes the file and
+/// runs two at a time; one that repairs or separates stems is heavy and runs
+/// one at a time.
 struct Job: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         case quality
         /// Track ID: Shazam + Apple Music. Light, network-bound.
         case identify
-        case stems(DJStemModel, DJStemChoice)
-        case repair
-        /// Measure only (for the Normalize card); not shown in the queue.
+        /// Measure only (the Normalize row's readout); not shown in the queue.
         case loudness
-        /// Measure, then save a copy at the target loudness.
-        case normalize(DJLoudnessTarget)
+        /// Repair → normalize to the target → stems, saved once.
+        case process(ProcessRecipe, DJLoudnessTarget)
 
         var isHeavy: Bool {
-            switch self {
-            case .stems, .repair: true
-            case .quality, .identify, .loudness, .normalize: false
-            }
+            if case .process(let recipe, _) = self { return recipe.isHeavy }
+            return false
         }
 
         /// Light jobs that decode the whole file: two at a time.
         var isDecoding: Bool {
             switch self {
-            case .loudness, .normalize: true
+            case .loudness: true
+            case .process(let recipe, _): !recipe.isHeavy
             default: false
             }
         }
@@ -39,10 +37,8 @@ struct Job: Identifiable, Equatable, Sendable {
             switch self {
             case .quality: "Quality check"
             case .identify: "Track ID"
-            case .stems(let model, _): "Stems · \(model.modelName)"
-            case .repair: "Repair"
             case .loudness: "Loudness"
-            case .normalize(let target): "Normalize to \(DJFormat.lufs(target.lufs, decimals: 0))"
+            case .process(let recipe, let target): recipe.title(target: target)
             }
         }
 
@@ -50,17 +46,16 @@ struct Job: Identifiable, Equatable, Sendable {
             switch self {
             case .quality: "waveform.badge.magnifyingglass"
             case .identify: "shazam.logo"
-            case .stems: "square.3.layers.3d"
-            case .repair: "wand.and.stars"
-            case .loudness, .normalize: "speaker.wave.2"
+            case .loudness: "speaker.wave.2"
+            case .process(let recipe, _):
+                recipe.repair == .on ? "wand.and.stars" : recipe.stems && !recipe.normalize ? "square.3.layers.3d" : "speaker.wave.2"
             }
         }
 
-        /// Same tool, any stem model.
+        /// Same tool, any options.
         func sameTool(as other: Kind) -> Bool {
             switch (self, other) {
-            case (.quality, .quality), (.identify, .identify), (.repair, .repair), (.stems, .stems), (.loudness, .loudness),
-                 (.normalize, .normalize): true
+            case (.quality, .quality), (.identify, .identify), (.loudness, .loudness), (.process, .process): true
             default: false
             }
         }
@@ -76,8 +71,7 @@ struct Job: Identifiable, Equatable, Sendable {
     let trackID: Track.ID
     let trackName: String
     let kind: Kind
-    /// The file type stems, repairs and normalized copies are saved as
-    /// (nil for quality checks and measuring).
+    /// The file type a Process run saves as (nil for checks and measuring).
     let format: AudioFileFormat?
     var state: State = .queued
     /// 0…1 while running, when the engine reports it.
@@ -97,13 +91,13 @@ struct Job: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 
-    /// "Stems · htdemucs · AIFF", "Repair · MP3 320".
+    /// "Repair · −10 LUFS · AIFF".
     var title: String {
         guard let format else { return kind.title }
         return "\(kind.title) · \(format.shortTitle)"
     }
 
-    /// The row's status line: "Queued", "Separating · 42%", "Done", the error.
+    /// The row's status line: "Waiting", "Repairing · 42%", "Done", the error.
     var statusLine: String {
         switch state {
         case .queued: return "Waiting"
@@ -111,10 +105,8 @@ struct Job: Identifiable, Equatable, Sendable {
             let verb = switch kind {
             case .quality: "Checking"
             case .identify: "Listening"
-            case .stems: "Separating"
-            case .repair: "Repairing"
             case .loudness: "Measuring"
-            case .normalize: "Normalizing"
+            case .process: "Starting"
             }
             let label = statusText ?? verb
             return progress.map { "\(label) · \(DJFormat.percent($0))" } ?? "\(label)…"

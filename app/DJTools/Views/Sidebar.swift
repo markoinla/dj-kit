@@ -51,7 +51,7 @@ struct TrackSidebar: View {
             if model.tracks.isEmpty {
                 VStack(spacing: DJSpace.xs) {
                     Text("No tracks yet").djText(.headline).foregroundStyle(DJColor.foreground)
-                    Text("Drop audio into the window.").djText(.caption).foregroundStyle(DJColor.mutedForeground)
+                    Text("Drop audio here").djText(.caption).foregroundStyle(DJColor.mutedForeground)
                 }
             }
         }
@@ -120,7 +120,7 @@ struct SidebarActivityCard: View {
                     Image(systemName: job.kind.systemImage)
                         .font(.system(size: 11))
                         .foregroundStyle(DJColor.ring)
-                    Text(job.kind == .repair ? "Repairing" : "Separating stems")
+                    Text(job.statusText ?? "Processing")
                         .djText(.captionMedium)
                         .foregroundStyle(DJColor.foreground)
                     Spacer(minLength: 0)
@@ -166,16 +166,10 @@ struct TrackMenu: View {
             Button(pending.count > 1 ? "Apply \(pending.count) Track IDs" : "Apply Track ID") { model.applyIdentity(pending) }
         }
         Divider()
+        Button(ids.count > 1 ? "Process \(ids.count) Tracks…" : "Process…") {
+            model.processRequest = ProcessRequest(trackIDs: ids)
+        }
         Button("Check Quality Again") { model.checkQuality(ids) }
-        Button(ids.count > 1 ? "Separate \(ids.count) Tracks' Stems" : "Separate Stems") {
-            model.separateStems(ids, model: model.settings.defaultStemModel)
-        }
-        Button(ids.count > 1 ? "Repair \(ids.count) Tracks" : "Repair") {
-            model.repair(ids)
-        }
-        Button(ids.count > 1 ? "Normalize \(ids.count) Tracks' Loudness" : "Normalize Loudness") {
-            model.normalize(ids)
-        }
         Divider()
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting(ids.compactMap { model.track($0)?.url })

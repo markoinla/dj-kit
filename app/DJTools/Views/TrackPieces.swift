@@ -136,14 +136,8 @@ struct TrackRow: View {
     private var line: String {
         if let job {
             switch (job.kind, job.state) {
-            case (.quality, _): return "Checking quality…"
-            case (_, .queued):
-                let tool = switch job.kind {
-                case .repair: "Repair"
-                case .normalize: "Normalize"
-                default: "Stems"
-                }
-                return "\(tool) · waiting"
+            case (.quality, _): return "Checking…"
+            case (_, .queued): return "Waiting"
             default: return job.statusLine
             }
         }
@@ -151,7 +145,7 @@ struct TrackRow: View {
         if track.qualityError != nil { return "Couldn't check" }
         var parts = [track.container.uppercased()]
         if let quality = track.quality { parts.append(DJFormat.duration(quality.duration)) }
-        // Only once measured (the Normalize card): measuring is a full decode.
+        // Only once measured (the Normalize row): measuring is a full decode.
         if let loudness = track.loudness, !loudness.isSilent { parts.append(DJFormat.lufs(loudness.integratedLUFS)) }
         if !track.results.isEmpty { parts.append(DJFormat.count(track.results.count, "result")) }
         return parts.joined(separator: " · ")

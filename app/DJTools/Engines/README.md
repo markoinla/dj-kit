@@ -34,32 +34,31 @@ reference implementation; the app no longer links or bundles them.
 
 ## Saving results (`Model/ResultWriter.swift`)
 
-The engines write their native 24-bit WAVs into a scratch folder on the
-output folder's volume; `AudioExport` converts each to the job's format
-(AIFF default, WAV, FLAC, MP3 320/256/192), copies the source's
-title/artist/album/artwork (title suffixed " (Vocals)", " (Repaired)", …;
-not for WAV) and the scratch folder is deleted however the job ends. Names:
-`<out>/<track> (Stems)/<stem>.<ext>` (replacing an older folder) and
-`<out>/<track> (Apollo).<ext>` and `<out>/<track> (Normalized).<ext>`
-(numbered when taken). The defaults are in Settings
-(`AppSettings.stemsFormat` / `repairFormat` / `normalizeFormat`); the "Save
-as" menu under each tool's button overrides them per job.
-
-Normalize (`ResultWriter.normalize`) needs no scratch file: LoudnessKit
-measures the source, the plan's gain is applied by `AudioExporter.export(…,
-gainDB:)` while it decodes the source and encodes the copy. With Settings'
-"Also normalize repaired tracks", `ResultWriter.repair` measures Apollo's
-WAV and saves it with the gain. Stems are never normalized.
+One Process run (`ResultWriter.process`) does repair → normalize → stems on
+one track. Apollo writes its 24-bit WAV into a scratch folder on the output
+folder's volume; LoudnessKit measures that (or the source, without repair);
+`AudioExport` saves it once with the plan's gain as the run's format (AIFF
+default, WAV, FLAC, MP3 320/256/192); Demucs separates the same audio and
+each stem is saved with the same gain. Tags: the source's plus the Track ID
+match, title unsuffixed on the finished track (" (Vocals)" … on stems), and
+"Repaired · −10.0 LUFS" appended to the comment. Names:
+`<out>/<track>.<ext>` (replaced on a re-run, never over the source) and
+`<out>/<track> (Stems)/<track> (Vocals).<ext>` (replacing an older folder).
+The scratch folder is deleted however the run ends. The last run's steps and
+format are remembered (`AppSettings.lastRecipe`).
 
 `Engines.real(supportDirectory:)` builds them; `supportDirectory` is
 `AppPaths.support` (`~/Library/Application Support/DJTools`, or
 `-supportDirectory <path>`).
 
-Heavy jobs (stems ~5.4 GB peak footprint, Apollo repairs ~2.9 GB) share one slot in
-`AppModel` (`heavyInFlight`), so they never run together. Loudness measuring
-(`Job.Kind.loudness`, lazily for the Normalize card) and normalizing are light
-but decode the whole file: two at a time (`maxConcurrentDecodes`), beside the
-heavy slot. Quality checks never measure loudness.
+Process runs that repair or separate (stems ~5.4 GB peak footprint, Apollo
+~2.9 GB, one after the other inside the run) share one slot in `AppModel`
+(`heavyInFlight`), so they never overlap. A run first waits for its track's
+quality check and Track ID (the name and the repair suggestion come from
+them). Loudness measuring (`Job.Kind.loudness`, lazily for the Normalize row)
+and normalize-only runs are light but decode the whole file: two at a time
+(`maxConcurrentDecodes`), beside the heavy slot. Quality checks never measure
+loudness.
 
 ## Building
 
@@ -86,12 +85,12 @@ DJTools.app/Contents/MacOS/DJTools -selfTest <audio> <out dir> \
   [-selfTestFormat aiff|wav|flac|mp3-320|mp3-256|mp3-192]
 ```
 
-Runs quality check, htdemucs stems and (with `-selfTestApollo`) Apollo
-install + repair and (with `-selfTestNormalize`) Normalize Loudness through
-the same adapters and `ResultWriter` the window uses, one after the other
-(both flags: the repair is normalized too), saved as `-selfTestFormat`
+Runs the quality check, then one Process run through the same adapters and
+`ResultWriter.process` the window uses: repair with `-selfTestApollo`
+(Apollo installed first if needed), normalize with `-selfTestNormalize`,
+htdemucs stems unless `-selfTestSkipStems`, saved as `-selfTestFormat`
 (default aiff); each output is decoded again and its rate, length and tags
-checked. A normalized output is also measured again with LoudnessKit and
+checked (the finished track's title must be the source's, unsuffixed). A normalized output is also measured again with LoudnessKit and
 must land within ±0.2 LU of the target, or on the ceiling (±0.1 dB) when the
 plan was capped. Prints one
 JSON object (timings, outputs, callback counts and whether any arrived off

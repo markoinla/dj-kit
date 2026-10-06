@@ -54,17 +54,12 @@ struct JobsList: View {
                         .foregroundStyle(DJColor.mutedForeground)
                         .padding(.bottom, DJSpace.xs)
                     Text("Nothing in the queue").djText(.headline).foregroundStyle(DJColor.foreground)
-                    Text("Stems and repairs run here one at a time; normalizing runs beside them.")
-                        .djText(.caption)
-                        .foregroundStyle(DJColor.mutedForeground)
-                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 60)
             }
             group("Now", running)
-            group("Up next", waiting, detail: waiting.isEmpty ? nil
-                  : waiting.contains(where: \.kind.isHeavy) ? "One heavy job at a time" : "Two at a time")
+            group("Up next", waiting)
             group("Done", Array(done))
         }
     }
