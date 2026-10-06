@@ -14,12 +14,6 @@ struct ApolloSetupRequest: Identifiable, Equatable {
     var trackIDs: [Track.ID]
 }
 
-/// The Process sheet (after a drop, or "Process…" on tracks).
-struct ProcessRequest: Identifiable, Equatable {
-    let id = UUID()
-    var trackIDs: [Track.ID]
-}
-
 /// The app's state: dropped tracks, the job queue and Apollo's setup.
 ///
 /// Jobs: quality checks start straight away, up to `maxConcurrentChecks`
@@ -38,10 +32,6 @@ final class AppModel {
     private(set) var apolloState: DJApolloSetupState = .notInstalled
     /// Drives the Apollo setup sheet.
     var apolloSetup: ApolloSetupRequest?
-    /// Drives the Process sheet.
-    var processRequest: ProcessRequest?
-    /// The job queue panel at the window's right edge.
-    var isShowingJobs = false
     /// A one-line message for the window ("Nothing to add…").
     var notice: String?
 
@@ -242,7 +232,6 @@ final class AppModel {
             return
         }
         for run in runs { enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format) }
-        isShowingJobs = true
     }
 
     /// Measures loudness for the Normalize row, once per track (not again
@@ -268,26 +257,21 @@ final class AppModel {
         jobs.last { $0.trackID == trackID && $0.kind.sameTool(as: kind) }
     }
 
-    /// The running or queued job shown on a track's sidebar row: heavy first
-    /// (a loudness measurement for the detail pane isn't shown).
-    func activeJob(for trackID: Track.ID) -> Job? {
-        let active = jobs.filter { $0.trackID == trackID && $0.state.isActive && $0.kind != .loudness }
-        return active.first { $0.kind.isHeavy && $0.state == .running }
-            ?? active.first { $0.state == .running }
-            ?? active.first
+    var activeJobCount: Int { jobs.filter(\.state.isActive).count }
+
+    /// A track's latest Process run (active, finished, failed or cancelled).
+    func processJob(for trackID: Track.ID) -> Job? {
+        jobs.last { $0.trackID == trackID && $0.kind.isProcess }
     }
 
-    var activeJobCount: Int { jobs.filter(\.state.isActive).count }
-    var activeHeavyJobs: [Job] { jobs.filter { $0.kind.isHeavy && $0.state.isActive } }
-    var runningHeavyJob: Job? { jobs.first { $0.kind.isHeavy && $0.state == .running } }
-
-    /// What the queue panel lists: stems, repairs and normalizing, and
-    /// quality checks and measurements only while they run or when they
-    /// failed (a dropped folder would bury the rest).
-    var visibleJobs: [Job] {
-        jobs.filter { job in
-            !job.kind.isBackground || job.state == .running || { if case .failed = job.state { return true } else { return false } }()
+    /// Where a track stands: being processed (queued or running), done (its
+    /// latest result is there and no run since failed), or ready.
+    func stage(of track: Track) -> TrackStage {
+        if let job = processJob(for: track.id) {
+            if job.state.isActive { return .processing }
+            if job.state.isUnsuccessful { return .ready }
         }
+        return track.latestFiles == nil ? .ready : .done
     }
 
     func cancel(_ id: Job.ID) {
@@ -305,23 +289,28 @@ final class AppModel {
         pump()
     }
 
-    func cancelAll() {
-        for job in jobs where job.state.isActive { cancel(job.id) }
-    }
-
-    func clearFinishedJobs() {
-        jobs.removeAll { !$0.state.isActive }
-    }
-
-    func retry(_ id: Job.ID) {
-        guard let job = jobs.first(where: { $0.id == id }) else { return }
-        jobs.removeAll { $0.id == id }
-        switch job.kind {
-        case .quality: checkQuality([job.trackID])
-        case .identify: identify([job.trackID])
-        case .loudness: measureLoudnessAgain(job.trackID)
-        case .process: enqueue(job.kind, for: job.trackID, format: job.format)
+    /// The sidebar's groups in order (Processing, Ready, Done), empty ones left out.
+    var trackGroups: [(stage: TrackStage, tracks: [Track])] {
+        let staged = tracks.map { (track: $0, stage: stage(of: $0)) }
+        return [TrackStage.processing, .ready, .done].compactMap { stage in
+            let members = staged.filter { $0.stage == stage }.map(\.track)
+            return members.isEmpty ? nil : (stage, members)
         }
+    }
+
+    /// Cancels every active job, or only the Process runs of `trackIDs`.
+    func cancelAll(_ trackIDs: [Track.ID]? = nil) {
+        for job in jobs where job.state.isActive {
+            if let trackIDs {
+                guard trackIDs.contains(job.trackID), job.kind.isProcess else { continue }
+            }
+            cancel(job.id)
+        }
+    }
+
+    /// Forgets a failed or cancelled run (its notice in the detail pane).
+    func dismissJob(_ id: Job.ID) {
+        jobs.removeAll { $0.id == id && !$0.state.isActive }
     }
 
     private func enqueue(_ kind: Job.Kind, for trackID: Track.ID, format: AudioFileFormat? = nil) {
@@ -336,6 +325,9 @@ final class AppModel {
 
     /// Starts what can start: checks and decodes up to their limits, one heavy job.
     private func pump() {
+        #if DEBUG
+        if isFixture { return }
+        #endif
         let runningChecks = jobs.filter { $0.kind == .quality && $0.state == .running }.count
         for job in jobs.filter({ $0.kind == .quality && $0.state == .queued }).prefix(max(0, Self.maxConcurrentChecks - runningChecks)) {
             start(job.id)
@@ -371,6 +363,22 @@ final class AppModel {
         jobs[index].progress = fraction
     }
 
+    /// Moves a Process run's stepper on; a late update for an earlier step is dropped.
+    private func setStep(_ id: Job.ID, _ step: ProcessStep, _ fraction: Double) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].state == .running else { return }
+        let steps = jobs[index].steps
+        if let current = jobs[index].currentStep, current != step,
+           let from = steps.firstIndex(of: current), let to = steps.firstIndex(of: step), to < from { return }
+        if jobs[index].currentStep != step { jobs[index].statusText = nil }
+        jobs[index].currentStep = step
+        jobs[index].stepProgress = fraction
+    }
+
+    private func setSteps(_ id: Job.ID, _ steps: [ProcessStep]) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].state == .running else { return }
+        jobs[index].steps = steps
+    }
+
     private func setStatus(_ id: Job.ID, _ text: String) {
         guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].state == .running else { return }
         jobs[index].statusText = text
@@ -399,6 +407,9 @@ final class AppModel {
         }
         let status: @Sendable (String) -> Void = { [weak self] line in
             Task { @MainActor in self?.setStatus(job.id, line) }
+        }
+        let step: @Sendable (ProcessStep, Double) -> Void = { [weak self] current, fraction in
+            Task { @MainActor in self?.setStep(job.id, current, fraction) }
         }
         do {
             guard track.fileExists else { throw AppError("Can't find the file. It may have moved.") }
@@ -442,10 +453,11 @@ final class AppModel {
                 )
                 guard !steps.isEmpty else { throw AppError("Nothing to do: no step is on.") }
                 if steps.repair, apolloState != .ready { throw AppError("Repair isn't set up yet.") }
+                setSteps(job.id, steps.order)
                 let processed = try await ResultWriter.process(
                     input: current.url, steps: steps, format: job.format ?? recipe.format,
                     tags: await TrackTags.forResults(current), outputFolder: try outputFolder(), engines: engines,
-                    progress: progress, status: status
+                    progress: progress, step: step, status: status
                 )
                 guard isRunning(job.id) else { return }
                 updateTrack(track.id) {
@@ -529,7 +541,6 @@ final class AppModel {
             for run in waiting where track(run.id) != nil {
                 enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format)
             }
-            if !waiting.isEmpty { isShowingJobs = true }
         }
     }
 
@@ -554,11 +565,14 @@ final class AppModel {
 
     #if DEBUG
     /// Fixture state for `-renderPreviews` (no tasks, nothing saved).
-    func installFixture(tracks: [Track], jobs: [Job], apolloState: DJApolloSetupState, showsJobs: Bool = false) {
+    @ObservationIgnored private var isFixture = false
+
+    func installFixture(tracks: [Track], jobs: [Job], apolloState: DJApolloSetupState) {
+        // Nothing starts: the fixture's jobs stay as they are drawn.
+        isFixture = true
         self.tracks = tracks
         self.jobs = jobs
         self.apolloState = apolloState
-        isShowingJobs = showsJobs
     }
     #endif
 }

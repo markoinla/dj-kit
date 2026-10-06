@@ -75,7 +75,7 @@ public actor ApolloRuntime {
 }
 ```
 (Additive: `repair(input:output:progress:status:)` also passes Apollo's status lines —
-"Loading model", "Repairing on MPS" — which the app shows in the job row.)
+"Loading model", "Repairing on MPS" — which the app shows on the running step.)
 
 `install` downloads `uv` into `supportDirectory/runtime/bin` with the official standalone
 installer (no Homebrew, no sudo) and keeps uv's cache, Python and venv under
@@ -84,11 +84,15 @@ installer (no Homebrew, no sudo) and keeps uv's cache, Python and venv under
 ## app/ — the SwiftUI shell (XcodeGen, `app/project.yml`)
 
 Depends on QualityKit, StemsKit, ApolloMLX, AudioExport and LoudnessKit by local path. Drop files or folders in;
-each track gets Track ID and a quality check straight away, and a Process sheet opens: Repair → Normalize →
-Stems as switches, one run per track that does them all (`Job.Kind.process`). The steps and file type start
-from the last run (`AppSettings.lastRecipe`; Stems off the first time); Repair starts from the quality
-check's suggestion (on for low quality / fake lossless). A job queue shows progress; results land in the
-output folder with Reveal in Finder.
+they're added and selected. The detail pane is a stepper, ① Analyze → ② Repair → ③ Normalize → ④ Stems, in
+one of three states derived from the track's jobs and results: **setup** (Analyze — the quality check and Track
+ID, run on drop — shows its own progress, then ②–④ as switches with options, the file type and Process),
+**processing** (one run per track that does them all, `Job.Kind.process`; each step waiting, running with its
+own bar from `Job.currentStep`/`stepProgress`, done or skipped; Cancel), and **done** (what the run did, the
+saved files as draggable rows/stem chips for Rekordbox, Process Again). The steps and file type start from the
+last run (`AppSettings.lastRecipe`; Stems off the first time); Repair starts from the quality check's
+suggestion (on for low quality / fake lossless). The sidebar groups tracks as Processing / Ready / Done; there
+is no separate queue.
 
 **Track ID** (`Engines/TrackIdentifier.swift`, behind `TrackIdentifying`): ShazamKit listens to three
 12 s windows (30/50/70 % in), the windows vote, MusicKit's catalog fills in album, label, release

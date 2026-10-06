@@ -502,6 +502,12 @@ enum DJFormat {
         "\(signed(dB, plus: true)) dB"
     }
 
+    /// A file type from its extension: "AIFF", "MP3", "FLAC".
+    static func container(_ pathExtension: String) -> String {
+        let ext = pathExtension.lowercased()
+        return ext == "aif" ? "AIFF" : ext.uppercased()
+    }
+
     /// A path with the home folder as "~".
     static func path(_ url: URL) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path

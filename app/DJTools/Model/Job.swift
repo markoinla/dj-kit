@@ -4,19 +4,24 @@ import Foundation
 /// One run of a tool on one track. Quality checks and Track ID are cheap and
 /// run side by side; a Process run that only normalizes decodes the file and
 /// runs two at a time; one that repairs or separates stems is heavy and runs
-/// one at a time.
+/// one at a time. A Process run also tracks its steps, for the stepper.
 struct Job: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         case quality
         /// Track ID: Shazam + Apple Music. Light, network-bound.
         case identify
-        /// Measure only (the Normalize row's readout); not shown in the queue.
+        /// Measure only (the Normalize row's readout).
         case loudness
         /// Repair → normalize to the target → stems, saved once.
         case process(ProcessRecipe, DJLoudnessTarget)
 
         var isHeavy: Bool {
             if case .process(let recipe, _) = self { return recipe.isHeavy }
+            return false
+        }
+
+        var isProcess: Bool {
+            if case .process = self { return true }
             return false
         }
 
@@ -29,28 +34,8 @@ struct Job: Identifiable, Equatable, Sendable {
             }
         }
 
-        /// Runs in the background for the UI; the queue only lists it while
-        /// it runs or when it failed.
+        /// A check or measurement (no file type).
         var isBackground: Bool { self == .quality || self == .identify || self == .loudness }
-
-        var title: String {
-            switch self {
-            case .quality: "Quality check"
-            case .identify: "Track ID"
-            case .loudness: "Loudness"
-            case .process(let recipe, let target): recipe.title(target: target)
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .quality: "waveform.badge.magnifyingglass"
-            case .identify: "shazam.logo"
-            case .loudness: "speaker.wave.2"
-            case .process(let recipe, _):
-                recipe.repair == .on ? "wand.and.stars" : recipe.stems && !recipe.normalize ? "square.3.layers.3d" : "speaker.wave.2"
-            }
-        }
 
         /// Same tool, any options.
         func sameTool(as other: Kind) -> Bool {
@@ -65,6 +50,13 @@ struct Job: Identifiable, Equatable, Sendable {
         case queued, running, finished, failed(String), cancelled
 
         var isActive: Bool { self == .queued || self == .running }
+
+        var isUnsuccessful: Bool {
+            switch self {
+            case .failed, .cancelled: true
+            default: false
+            }
+        }
     }
 
     let id: UUID
@@ -79,6 +71,12 @@ struct Job: Identifiable, Equatable, Sendable {
     var resultURL: URL?
     /// The engine's own status line while running (Apollo: "Loading model", …).
     var statusText: String?
+    /// A Process run's steps, settled when it starts (Repair's suggestion
+    /// needs the quality check); empty before that.
+    var steps: [ProcessStep] = []
+    /// The step running now, and how far along it is (0…1).
+    var currentStep: ProcessStep?
+    var stepProgress: Double?
     let createdAt: Date
 
     init(trackID: Track.ID, trackName: String, kind: Kind, format: AudioFileFormat? = nil,
@@ -91,28 +89,30 @@ struct Job: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 
-    /// "Repair · −10 LUFS · AIFF".
-    var title: String {
-        guard let format else { return kind.title }
-        return "\(kind.title) · \(format.shortTitle)"
+    /// The steps this run does: settled ones once it started, else the
+    /// recipe's plan.
+    var plannedSteps: [ProcessStep] {
+        guard steps.isEmpty, case .process(let recipe, _) = kind else { return steps }
+        return recipe.plannedSteps
     }
 
-    /// The row's status line: "Waiting", "Repairing · 42%", "Done", the error.
-    var statusLine: String {
-        switch state {
-        case .queued: return "Waiting"
-        case .running:
-            let verb = switch kind {
-            case .quality: "Checking"
-            case .identify: "Listening"
-            case .loudness: "Measuring"
-            case .process: "Starting"
-            }
-            let label = statusText ?? verb
-            return progress.map { "\(label) · \(DJFormat.percent($0))" } ?? "\(label)…"
-        case .finished: return "Done"
-        case .failed(let message): return message
-        case .cancelled: return "Cancelled"
-        }
+    /// Where `step` stands in this run.
+    func stage(of step: ProcessStep) -> StepStage {
+        let planned = plannedSteps
+        guard let index = planned.firstIndex(of: step) else { return .skipped }
+        if state == .finished { return .done }
+        guard state == .running, let current = currentStep, let at = planned.firstIndex(of: current) else { return .waiting }
+        return index < at ? .done : index == at ? .running : .waiting
     }
+
+    /// "Repairing · 42%" for the running step.
+    var stepLine: String {
+        let label = statusText ?? currentStep?.verb ?? "Starting"
+        return stepProgress.map { "\(label) · \(DJFormat.percent($0))" } ?? "\(label)…"
+    }
+}
+
+/// A step's place in a Process run, for the stepper.
+enum StepStage: Equatable, Sendable {
+    case waiting, running, done, skipped
 }

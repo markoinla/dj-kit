@@ -39,13 +39,39 @@ struct ProcessRecipe: Codable, Hashable, Sendable {
 
     /// Runs Apollo or Demucs (possibly: an unresolved suggestion counts).
     var isHeavy: Bool { repair != .off || stems }
+}
 
-    /// "Repair · −10 LUFS · Stems".
-    func title(target: DJLoudnessTarget) -> String {
-        var steps: [String] = []
-        if repair == .on { steps.append("Repair") }
-        if normalize { steps.append(DJFormat.lufs(target.lufs, decimals: 0)) }
-        if stems { steps.append("Stems") }
-        return steps.isEmpty ? "Process" : steps.joined(separator: " · ")
+/// One step of a Process run, in the order they run. Saving the finished
+/// track belongs to Normalize (or to Repair when it doesn't normalize).
+enum ProcessStep: String, CaseIterable, Sendable {
+    case repair, normalize, stems
+
+    var title: String {
+        switch self {
+        case .repair: "Repair"
+        case .normalize: "Normalize"
+        case .stems: "Stems"
+        }
+    }
+
+    /// The running step's word when the engine hasn't sent its own line.
+    var verb: String {
+        switch self {
+        case .repair: "Repairing"
+        case .normalize: "Normalizing"
+        case .stems: "Separating"
+        }
+    }
+}
+
+extension ProcessRecipe {
+    /// The steps a run of this recipe will (or, while Repair is still a
+    /// suggestion, may) do.
+    var plannedSteps: [ProcessStep] {
+        var steps: [ProcessStep] = []
+        if repair != .off { steps.append(.repair) }
+        if normalize { steps.append(.normalize) }
+        if stems { steps.append(.stems) }
+        return steps
     }
 }

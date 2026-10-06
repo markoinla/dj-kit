@@ -185,11 +185,16 @@ enum SelfTest {
                 log("process (\(format.rawValue))…")
                 let progress = CallbackRecorder<Double>()
                 let status = CallbackRecorder<String>()
+                let stepChanges = CallbackRecorder<String>()
+                let stepOrder = StepOrder()
                 let start = clock.now
                 let tags = await AudioTags.read(from: input)
                 let processed = try await ResultWriter.process(
                     input: input, steps: steps, format: format, tags: tags, outputFolder: output, engines: engines,
                     progress: { progress.record($0, every: 0.1) { log("process \(Int($0 * 100))%") } },
+                    step: { current, _ in
+                        if stepOrder.enter(current) { stepChanges.record(current.rawValue, every: 0) { log("process step: \($0)") } }
+                    },
                     status: { status.record($0, every: 0) { log("process status: \($0)") } }
                 )
                 let elapsed = clock.now - start
@@ -226,6 +231,8 @@ enum SelfTest {
                 let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: output.path))?
                     .filter { $0.hasPrefix(".") || $0.hasSuffix(".wav") && format != .wav } ?? []
                 stepOK = stepOK && leftovers.isEmpty
+                // Every step the run does, once each, in order.
+                stepOK = stepOK && stepOrder.entered == steps.order && !stepOrder.wentBack
                 step["leftovers"] = leftovers
                 step["ok"] = stepOK
                 step["seconds"] = seconds(elapsed)
@@ -234,6 +241,7 @@ enum SelfTest {
                 step["stemsFolder"] = orNull(files.stemsFolder?.path)
                 step["progress"] = progress.summary
                 step["status"] = status.summary
+                step["steps"] = stepChanges.summary
                 step["processPeakRSSMB"] = peakRSSMB(children: false)
                 ok = ok && stepOK
                 log("process done in \(seconds(elapsed)) s")
@@ -378,6 +386,26 @@ enum SelfTest {
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
     }
+}
+
+/// The steps a run reported, in the order it entered them.
+private final class StepOrder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var steps: [ProcessStep] = []
+    private var back = false
+
+    /// Notes `step`; true when it's a new one.
+    func enter(_ step: ProcessStep) -> Bool {
+        lock.withLock {
+            if steps.last == step { return false }
+            if steps.contains(step) { back = true; return false }
+            steps.append(step)
+            return true
+        }
+    }
+
+    var entered: [ProcessStep] { lock.withLock { steps } }
+    var wentBack: Bool { lock.withLock { back } }
 }
 
 /// Collects engine callbacks: how many, whether each arrived on the main
