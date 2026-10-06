@@ -7,19 +7,23 @@ public enum BPMRange {
   /// Downtempo genres, where a 90 BPM beat should not read as 180 nor 70 as 140.
   public static let slow: ClosedRange<Double> = 60...120
 
-  /// `slow` for downtempo, trip-hop, chill(out), lounge, reggae, dub (not dubstep, dub techno or
-  /// dub house) and ambient; `standard` otherwise, including for a missing genre.
+  /// `slow` for downtempo, trip-hop, chill(out), lounge, reggae, dub and ambient; `standard`
+  /// otherwise, including for a missing genre, and for any genre that names a club style too
+  /// ("Organic House / Downtempo", "Chill House", "Ambient Techno", "Chillstep", "Dub Techno").
   /// Case-, space- and punctuation-insensitive ("Trip Hop", "trip-hop", "Chill-Out").
   public static func forGenre(_ genre: String?) -> ClosedRange<Double> {
     guard let genre, !genre.isEmpty else { return standard }
     let lower = genre.lowercased()
     let compact = String(lower.unicodeScalars.filter { CharacterSet.letters.contains($0) })
+    let club = ["house", "techno", "step", "garage", "bass", "trance", "break", "dnb", "jungle", "electro"]
+    // "Electronic(a)" is no style.
+    let styles = compact.replacingOccurrences(of: "electronic", with: "")
+    if club.contains(where: styles.contains) { return standard }
     if ["downtempo", "triphop", "chill", "lounge", "reggae", "ambient"].contains(where: compact.contains) {
       return slow
     }
     let words = lower.split(whereSeparator: { !$0.isLetter }).map(String.init)
-    let dub = words.contains("dub") || words.contains("dubwise")
-    if dub && !["dubstep", "techno", "house"].contains(where: compact.contains) { return slow }
+    if words.contains("dub") || words.contains("dubwise") { return slow }
     return standard
   }
 }

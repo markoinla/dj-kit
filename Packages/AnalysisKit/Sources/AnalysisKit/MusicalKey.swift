@@ -26,7 +26,7 @@ public struct MusicalKey: Sendable, Codable, Hashable {
   static let names = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 
   /// Reads a key tag: musical ("Am", "A minor", "Amin", "A min", "G#m", "A♭m", "F#",
-  /// a lone lowercase "a" = minor), Camelot ("8A", "08A", "8a") or Open Key
+  /// a lone lowercase "a" = minor, a capital "M" = major: "C#M"), Camelot ("8A", "08A", "8a") or Open Key
   /// ("1m" = A minor, "1d" = C major). Nil for anything else.
   public init?(parsing tag: String) {
     let text = tag.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -66,7 +66,8 @@ public struct MusicalKey: Sendable, Codable, Hashable {
       }
     }
     let isMinor: Bool
-    switch rest.trimmingCharacters(in: .whitespaces).lowercased() {
+    let quality = rest.trimmingCharacters(in: .whitespaces)
+    switch quality == "M" ? "maj" : quality.lowercased() {  // "C#M" major, "C#m" minor
     case "": isMinor = letter.isLowercase
     case "m", "min", "minor": isMinor = true
     case "maj", "major": isMinor = false

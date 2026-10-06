@@ -52,13 +52,15 @@ enum TrackTags {
 
     /// `tags` with BPM and key from the track's analysis where `existing`
     /// (the file's own tags) has none: existing tags always win. BPM is
-    /// folded for the track's genre and left out when the tempo isn't
-    /// steady; the key is spelled as Settings ▸ Analysis says.
+    /// folded for the genre the written file ends up with (`tags`' genre,
+    /// else the file's) and left out when the tempo isn't steady; the key is
+    /// spelled as Settings ▸ Analysis says.
     static func fillingAnalysis(_ tags: AudioTags, from track: Track, keyTag: KeyTagStyle, existing: AudioTags) -> AudioTags {
         var filled = tags
         guard let analysis = track.analysis else { return filled }
-        if !AudioTags.hasBPM(existing.bpm), let tempo = analysis.tempo, tempo.isSteady, let bpm = track.detectedBPM {
-            filled.bpm = DJBPM.string(bpm)
+        if !AudioTags.hasBPM(existing.bpm), let tempo = analysis.tempo, tempo.isSteady {
+            let genre = [tags.genre, existing.genre].compactMap { $0?.trimmed }.first { !$0.isEmpty }
+            filled.bpm = DJBPM.string(tempo.bpm(genre: genre))
         }
         if existing.key?.trimmed.isEmpty ?? true, let key = analysis.key?.key {
             filled.key = keyTag == .camelot ? key.camelot : key.musical

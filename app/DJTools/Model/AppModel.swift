@@ -184,6 +184,8 @@ final class AppModel {
             return track.identity != nil && track.fileExists && !applying.contains(id)
         }
         guard !targets.isEmpty else { return }
+        // Before `applying`: analyzeIfNeeded skips tracks being written.
+        analyzeIfNeeded(targets)
         applying.formUnion(targets)
         let rename = settings.renameOnApply
         Task {
@@ -265,8 +267,12 @@ final class AppModel {
 
     /// BPM and key for the Analyze row and the tags, once per track (not
     /// again after a failure until asked), when Settings says so.
+    ///
+    /// A model that couldn't be set up (offline) fails only that job: the
+    /// next trigger (showing the track, Process, Apply, Try Again, relaunch)
+    /// tries again, nothing retries by itself.
     func analyzeIfNeeded(_ ids: [Track.ID]) {
-        guard settings.detectBPMKeyOnAdd else { return }
+        guard settings.detectBPMKey else { return }
         for id in ids {
             guard let track = track(id), track.analysis == nil, track.analysisError == nil, track.fileExists,
                   !applying.contains(id), job(for: id, kind: .analyze)?.state.isActive != true
@@ -275,9 +281,10 @@ final class AppModel {
         }
     }
 
-    /// Detects BPM and key again after a failure.
+    /// Detects BPM and key again after a failure (not while its tags are
+    /// being written).
     func analyze(_ ids: [Track.ID]) {
-        for id in ids {
+        for id in ids where !applying.contains(id) {
             updateTrack(id) { $0.analysisError = nil }
             enqueue(.analyze, for: id)
         }
@@ -527,7 +534,14 @@ final class AppModel {
             if job.kind == .quality { updateTrack(track.id) { $0.qualityError = message } }
             if job.kind == .loudness { updateTrack(track.id) { $0.loudnessError = message } }
             if job.kind == .identify { updateTrack(track.id) { $0.identifyError = message } }
-            if job.kind == .analyze { updateTrack(track.id) { $0.analysisError = message } }
+            if job.kind == .analyze {
+                if error is DJAnalysisModelUnavailable {
+                    // Not the file's fault: the others queued now would fail the same way.
+                    jobs.removeAll { $0.kind == .analyze && $0.state == .queued }
+                } else {
+                    updateTrack(track.id) { $0.analysisError = message }
+                }
+            }
             finish(job.id, .failed(message))
         }
     }

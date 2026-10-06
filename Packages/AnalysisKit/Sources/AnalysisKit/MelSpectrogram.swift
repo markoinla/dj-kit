@@ -46,20 +46,14 @@ enum MelSpectrogram {
   static let window: [Float] = (0..<fftSize).map { Float(0.5 - 0.5 * cos(2 * Double.pi * Double($0) / Double(fftSize))) }
 
   /// Log-mel frames of 22050 Hz mono audio: [frames × 128] row-major, frames = 1 + count / 441.
+  /// Works in blocks of frames (no padded copy of the signal, no full magnitude matrix), so a long
+  /// mix needs little beyond the signal and the result.
   static func compute(_ signal: [Float]) -> (values: [Float], frames: Int) {
     let n = signal.count
     guard n > fftSize / 2 else { return ([], 0) }
     let pad = fftSize / 2
-    var padded = [Float](repeating: 0, count: n + 2 * pad)
-    padded.withUnsafeMutableBufferPointer { p in
-      p.baseAddress!.advanced(by: pad).update(from: signal, count: n)
-      for i in 0..<pad {
-        p[pad - 1 - i] = signal[i + 1]  // reflect, edge sample not repeated
-        p[pad + n + i] = signal[n - 2 - i]
-      }
-    }
     let frames = 1 + n / hop
-    var magnitudes = [Float](repeating: 0, count: frames * bins)
+    var mel = [Float](repeating: 0, count: frames * bands)
     let log2n = vDSP_Length(10)
     guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return ([], 0) }
     defer { vDSP_destroy_fftsetup(setup) }
@@ -67,43 +61,58 @@ enum MelSpectrogram {
     let blocks = (frames + block - 1) / block
     // vDSP's real FFT returns 2× the DFT; torch.stft(normalized=True) divides by sqrt(n_fft).
     let scale = 1 / (2 * Float(fftSize).squareRoot())
-    padded.withUnsafeBufferPointer { src in
-      magnitudes.withUnsafeMutableBufferPointer { dst in
+    signal.withUnsafeBufferPointer { src in
+      mel.withUnsafeMutableBufferPointer { dst in
         // Read-only input, disjoint output rows per block, and a setup vDSP allows to share.
         nonisolated(unsafe) let src = src.baseAddress!, dst = dst.baseAddress!, setup = setup
         DispatchQueue.concurrentPerform(iterations: blocks) { b in
+          let first = b * block, count = min(frames, first + block) - first
+          var magnitudes = [Float](repeating: 0, count: count * bins)
+          var edge = [Float](repeating: 0, count: fftSize)
           var frame = [Float](repeating: 0, count: fftSize)
           var re = [Float](repeating: 0, count: fftSize / 2)
           var im = [Float](repeating: 0, count: fftSize / 2)
           re.withUnsafeMutableBufferPointer { rp in
             im.withUnsafeMutableBufferPointer { ip in
               var split = DSPSplitComplex(realp: rp.baseAddress!, imagp: ip.baseAddress!)
-              for t in (b * block)..<min(frames, (b + 1) * block) {
-                vDSP_vmul(src + t * hop, 1, window, 1, &frame, 1, vDSP_Length(fftSize))
+              for i in 0..<count {
+                // Centered frames, reflect-padded at the ends (edge sample not repeated).
+                let start = (first + i) * hop - pad
+                if start >= 0 && start + fftSize <= n {
+                  vDSP_vmul(src + start, 1, window, 1, &frame, 1, vDSP_Length(fftSize))
+                } else {
+                  for j in 0..<fftSize {
+                    let k = start + j
+                    edge[j] = src[k < 0 ? -k : k >= n ? 2 * n - 2 - k : k]
+                  }
+                  vDSP_vmul(edge, 1, window, 1, &frame, 1, vDSP_Length(fftSize))
+                }
                 frame.withUnsafeBufferPointer { f in
                   f.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: fftSize / 2) {
                     vDSP_ctoz($0, 2, &split, 1, vDSP_Length(fftSize / 2))
                   }
                 }
                 vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
-                let row = dst + t * bins
-                row[0] = abs(rp[0]) * scale
-                row[bins - 1] = abs(ip[0]) * scale
-                for k in 1..<(fftSize / 2) {
-                  row[k] = (rp[k] * rp[k] + ip[k] * ip[k]).squareRoot() * scale
+                magnitudes.withUnsafeMutableBufferPointer { m in
+                  let row = m.baseAddress! + i * bins
+                  row[0] = abs(rp[0]) * scale
+                  row[bins - 1] = abs(ip[0]) * scale
+                  for k in 1..<(fftSize / 2) {
+                    row[k] = (rp[k] * rp[k] + ip[k] * ip[k]).squareRoot() * scale
+                  }
                 }
               }
             }
           }
+          let out = dst + first * bands
+          vDSP_mmul(magnitudes, 1, filterbank, 1, out, 1, vDSP_Length(count), vDSP_Length(bands), vDSP_Length(bins))
+          var k: Float = 1000
+          vDSP_vsmul(out, 1, &k, out, 1, vDSP_Length(count * bands))
+          var total = Int32(count * bands)
+          vvlog1pf(out, out, &total)
         }
       }
     }
-    var mel = [Float](repeating: 0, count: frames * bands)
-    vDSP_mmul(magnitudes, 1, filterbank, 1, &mel, 1, vDSP_Length(frames), vDSP_Length(bands), vDSP_Length(bins))
-    var k: Float = 1000
-    vDSP_vsmul(mel, 1, &k, &mel, 1, vDSP_Length(mel.count))
-    var count = Int32(mel.count)
-    mel.withUnsafeMutableBufferPointer { vvlog1pf($0.baseAddress!, $0.baseAddress!, &count) }
     return (mel, frames)
   }
 

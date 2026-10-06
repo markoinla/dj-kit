@@ -90,8 +90,13 @@ public actor BeatTracker {
       }
       let partial = modelsDirectory.appendingPathComponent(".partial-\(UUID().uuidString)")
       try fm.moveItem(at: tmp, to: partial)
-      _ = try? fm.removeItem(at: weightsFile)
-      try fm.moveItem(at: partial, to: weightsFile)
+      do {
+        _ = try? fm.removeItem(at: weightsFile)
+        try fm.moveItem(at: partial, to: weightsFile)
+      } catch {
+        try? fm.removeItem(at: partial)
+        throw error
+      }
     } else {
       progress("Verifying the tempo model")
       let digest = try Self.sha256(weightsFile)
@@ -104,12 +109,17 @@ public actor BeatTracker {
     progress("Tempo model ready")
   }
 
-  /// Deletes the weights; the next prepare() downloads them again.
+  /// Deletes the weights (and any half-installed `.partial-*` copy); the next prepare()
+  /// downloads them again.
   public func removeWeights() throws {
     model = nil
     verified = false
-    if FileManager.default.fileExists(atPath: weightsFile.path) {
-      try FileManager.default.removeItem(at: weightsFile)
+    let fm = FileManager.default
+    for name in (try? fm.contentsOfDirectory(atPath: modelsDirectory.path)) ?? [] where name.hasPrefix(".partial-") {
+      try? fm.removeItem(at: modelsDirectory.appendingPathComponent(name))
+    }
+    if fm.fileExists(atPath: weightsFile.path) {
+      try fm.removeItem(at: weightsFile)
     }
   }
 
@@ -168,8 +178,9 @@ public actor BeatTracker {
     let bands = MelSpectrogram.bands, border = Self.borderFrames
     // Each chunk: mel[max(s,0) ..< min(s+1500, T)], zero-padded left by max(0,-s) and right by
     // max(0, min(6, s+1500-T)).
-    struct Chunk { var start: Int; var length: Int; var data: [Float] }
-    let chunks = Self.chunkStarts(frames: frames).map { s -> Chunk in
+    // Each chunk's input is copied out only when it runs, so a long mix holds one at a time.
+    let starts = Self.chunkStarts(frames: frames)
+    func input(_ s: Int) -> (data: [Float], length: Int) {
       let lo = max(s, 0), hi = min(s + Self.chunkFrames, frames)
       let left = max(0, -s), right = max(0, min(border, s + Self.chunkFrames - frames))
       let length = left + (hi - lo) + right
@@ -179,24 +190,25 @@ public actor BeatTracker {
           (d.baseAddress! + left * bands).update(from: m.baseAddress! + lo * bands, count: (hi - lo) * bands)
         }
       }
-      return Chunk(start: s, length: length, data: data)
+      return (data, length)
     }
     // One chunk per call: batching measured no faster on the GPU and multiplies peak memory.
     var predictions: [[Float]] = []
-    for chunk in chunks {
+    for s in starts {
       try Task.checkCancellation()
+      let chunk = input(s)
       let out = model(MLXArray(chunk.data, [1, chunk.length, bands]))
       eval(out)
       predictions.append(out.asArray(Float.self))
-      progress?(Double(predictions.count) / Double(chunks.count))
+      progress?(Double(predictions.count) / Double(starts.count))
       await Task.yield()
     }
     Memory.clearCache()
     // keep_first: later chunks are written first so earlier ones overwrite the overlap.
     var piece = [Float](repeating: -1000, count: frames)
-    for c in chunks.indices.reversed() {
+    for c in starts.indices.reversed() {
       let kept = predictions[c].dropFirst(border).dropLast(border)
-      var t = chunks[c].start + border
+      var t = starts[c] + border
       for v in kept {
         if t >= 0 && t < frames { piece[t] = v }
         t += 1

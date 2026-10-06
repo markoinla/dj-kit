@@ -102,7 +102,7 @@ struct SettingsView: View {
 
         case .analysis:
             Section {
-                Toggle("Detect BPM and key when added", isOn: $settings.detectBPMKeyOnAdd)
+                Toggle("Detect BPM and key", isOn: $settings.detectBPMKey)
                 Picker("Key tag", selection: $settings.keyTag) {
                     ForEach(KeyTagStyle.allCases, id: \.self) { Text($0.title).tag($0) }
                 }

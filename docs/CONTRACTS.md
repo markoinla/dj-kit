@@ -219,6 +219,7 @@ public struct MusicalKey: Sendable, Codable, Hashable {
   public var musical: String { get }   // Rekordbox spelling: Abm Ebm Bbm Fm Cm Gm Dm Am Em Bm F#m Dbm /
                                        // B F# Db Ab Eb Bb F C G D A E
   public init?(parsing tag: String)    // "Am", "A minor", "Amin", "8A", "08A", "G#m", "1m"/"1d" (Open Key), …
+                                       // a trailing capital "M" is major ("C#M"), "m" minor
 }
 public struct KeyEstimate: Sendable, Codable, Equatable {
   public var key: MusicalKey
@@ -230,13 +231,16 @@ public struct TempoEstimate: Sendable, Codable, Equatable {
   public var beatCount: Int
   public var stability: Double   // coefficient of variation of the beat interval over 4-beat spans on the grid
   public var isSteady: Bool { get }    // stability < steadyThreshold
-  public func bpm(in range: ClosedRange<Double>) -> Double   // halve/double into range when outside it
+  public func bpm(in range: ClosedRange<Double>) -> Double
+      // halve/double into range when outside it; one that would overshoot the other end stays (175.4 → 175.4)
 }
 public enum BPMRange {
   public static let standard: ClosedRange<Double>   // 88...175
   public static let slow: ClosedRange<Double>       // 60...120
   public static func forGenre(_ genre: String?) -> ClosedRange<Double>
-      // slow for downtempo, trip-hop, chill(out), lounge, reggae, dub (not dubstep), ambient; else standard
+      // standard when it names a club style (house, techno, …step, garage, bass, trance, break(s),
+      // dnb, jungle, electro — "Electronic(a)" isn't one); else slow for downtempo, trip-hop,
+      // chill(out), lounge, reggae, dub, ambient; else standard
 }
 public enum BPMFormat {
   public static func string(_ bpm: Double) -> String   // "124" within ±0.05 of a whole number, else "123.5"
@@ -256,13 +260,19 @@ public actor BeatTracker {
   public func tempo(monoSamples: [Float], sampleRate: Double) async throws -> TempoEstimate?  // resamples itself
   public func removeWeights() throws
 }
+public enum MusicalAnalyzerError: Error, LocalizedError {
+  case unreadable(String)         // the file
+  case modelUnavailable(String)   // download / check failed (offline, server): transient
+}
 public actor MusicalAnalyzer {
   public init(modelsDirectory: URL)
   public var isPrepared: Bool { get async }
   public nonisolated func analyze(_ url: URL, progress: (@Sendable (Double) -> Void)? = nil,
                                   status: (@Sendable (String) -> Void)? = nil) async throws -> MusicalAnalysis
-      // one AVAudioFile decode to mono at the file's rate; key (CPU) and tempo (GPU) concurrently from it;
-      // prepares the model on first use (one shared download for concurrent calls); cancellable.
+      // one streaming AVAudioFile decode to 22050 Hz mono (no full-rate copy; the tracker skips its
+      // resample, libkeyfinder gives the same keys); key (CPU) and tempo (GPU) concurrently from it;
+      // prepares the model on first use, and again if the weights went missing (one shared download
+      // for concurrent calls; a cancelled caller returns at once, the last one cancels it).
       // status: "Downloading model…" / "Verifying model…" while preparing, then "Analyzing…".
   public func removeWeights() async throws
 }
@@ -274,16 +284,18 @@ separately), key agreement (exact, relative, fifth, parallel), unsteady count, m
 and per-track mismatches. Read-only.
 
 The app (`MusicalAnalyzing` / `AnalysisKitAdapter`, mirrors `DJMusicalAnalysis` …): Settings ▸
-Analysis ("Detect BPM and key when added", on; "Key tag" Musical/Camelot, Musical; "Remove Model…").
+Analysis ("Detect BPM and key", on — gates all of the below; "Key tag" Musical/Camelot, Musical; "Remove Model…").
 Runs on add (and lazily when an unanalyzed track is shown) as `Job.Kind.analyze`, 2 at a time; the
 result is `Track.analysis` (raw), with the file's own BPM/key/genre tags at that time in
-`Track.fileTags`; never re-run once there. Readout in the Analyze row: `124 BPM · 8A · Am`, `~96 BPM`
+`Track.fileTags`; never re-run once there. A file error is kept (`Track.analysisError`, Try Again);
+a model that couldn't be set up only fails that job (and drops the queued ones), retried on the
+next trigger (showing the track, Process, Apply, Try Again, relaunch), never by itself. Readout in the Analyze row: `124 BPM · 8A · Am`, `~96 BPM`
 when the tempo isn't steady, a dim `tag: 123 · 9A · Em` when the file's own tags disagree (±0.5 BPM
-against the folded detection / a different key). BPM is folded with `BPMRange.forGenre` (file genre
-tag, else Track ID's genre), at display/save time. Writing: Process outputs (finished track + stems)
+against the folded detection / a different key). BPM is folded with `BPMRange.forGenre` at display/save
+time, for the genre the written tags carry: Track ID's (unless turned down), else the file's. Writing: Process outputs (finished track + stems)
 and the original on Apply get `AudioTags.bpm` / `AudioTags.key` only where the file has none (any
 BPM text but "0" counts); unsteady tempo is never written. A Process run waits for the track's
-analysis (starting it, ahead of the queue) before it starts; Apply waits for a pending one. A failed
+analysis (starting it, ahead of the queue) before it starts; Apply starts one if needed and waits for it. A failed
 analysis saves without and shows its error.
 
 AudioExport additions: `AudioTags.bpm: String?`, `AudioTags.key: String?` — ID3 TBPM/TKEY (AIFF,

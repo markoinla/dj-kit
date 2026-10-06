@@ -50,6 +50,7 @@ import Testing
     ("Gb", "F#"), ("F♯ major", "F#"), ("Fmaj", "F"), ("C", "C"), ("A", "A"), ("Cmajor", "C"),
     ("1m", "Am"), ("1d", "C"), ("01d", "C"), ("2m", "Em"), ("12d", "F"), ("6m", "Abm"), ("7m", "Ebm"),
     ("12A", "Dbm"), ("1B", "B"), ("Cb", "B"), ("E#m", "Fm"), ("bbm", "Bbm"),
+    ("C#M", "Db"), ("C#m", "Dbm"), ("AM", "A"), ("Am", "Am"), ("AMIN", "Am"), ("A MAJOR", "A"), ("C#Maj", "Db"),
   ])
   func parses(_ tag: String, _ expected: String) {
     #expect(MusicalKey(parsing: tag)?.musical == expected)
