@@ -32,7 +32,7 @@ public enum ApolloMLXError: Error, LocalizedError {
 
   public var errorDescription: String? {
     switch self {
-    case .missingWeight(let n): "Apollo weights are missing tensor \(n)"
+    case .missingWeight(let n): "Repair model weights are missing tensor \(n)"
     case .badWeights(let m), .checkpoint(let m), .audio(let m), .download(let m): m
     }
   }

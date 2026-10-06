@@ -56,17 +56,19 @@ struct Engines: Sendable {
     var stems: any StemSeparating
     var apollo: any ApolloRepairing
     var loudness: any LoudnessMeasuring
+    var identifier: any TrackIdentifying
     /// True for the fakes: the toolbar says "Demo engines".
     var isFake: Bool
 
     /// The real engines: QualityKit, StemsKit, ApolloMLX and LoudnessKit behind their
-    /// adapters (Engines/RealEngines.swift).
+    /// adapters (Engines/RealEngines.swift), and Track ID (Engines/TrackIdentifier.swift).
     static func real(supportDirectory: URL) -> Engines {
         Engines(
             quality: QualityKitAdapter(),
             stems: StemsKitAdapter(supportDirectory: supportDirectory),
             apollo: ApolloMLXAdapter(supportDirectory: supportDirectory),
             loudness: LoudnessKitAdapter(),
+            identifier: ShazamTrackIdentifier(),
             isFake: false
         )
     }
@@ -77,6 +79,7 @@ struct Engines: Sendable {
             stems: FakeStemSeparator(speed: speed),
             apollo: FakeApolloRuntime(supportDirectory: supportDirectory, speed: speed),
             loudness: FakeLoudnessMeter(speed: speed),
+            identifier: FakeTrackIdentifier(speed: speed),
             isFake: true
         )
     }
@@ -106,4 +109,11 @@ enum LaunchArguments {
         guard let index = arguments.firstIndex(of: "-\(name)"), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
     }
+}
+
+/// Track ID: Shazam + Apple Music (`ShazamTrackIdentifier`). Returns nil when
+/// nothing matched; throws when no listen got an answer at all (offline,
+/// ShazamKit not allowed for this build). Cancelled by cancelling the task.
+protocol TrackIdentifying: Sendable {
+    func identify(_ url: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> DJTrackIdentity?
 }

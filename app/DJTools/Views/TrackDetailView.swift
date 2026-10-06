@@ -20,6 +20,8 @@ struct TrackDetailContent: View {
     let ids: [Track.ID]
     /// The picker's choice; Settings' default until changed.
     @State private var stemModel: DJStemModel?
+    /// The stems to keep; Settings' choice until changed.
+    @State private var stemOutputs: Set<String>?
     /// The format menus' choices for this job; Settings' defaults until changed.
     @State private var stemsFormat: AudioFileFormat?
     @State private var repairFormat: AudioFileFormat?
@@ -33,6 +35,7 @@ struct TrackDetailContent: View {
                 if !track.fileExists {
                     DJNotice(kind: .warning, message: "Can't find this file any more. It may have been moved or renamed; drop it in again to keep working on it.")
                 }
+                TrackIDSection(track: track, job: model.job(for: track.id, kind: .identify))
                 QualitySection(track: track, job: model.job(for: track.id, kind: .quality))
             } else {
                 SelectionHeader(tracks: tracks)
@@ -51,6 +54,8 @@ struct TrackDetailContent: View {
     private func toolsSection(_ tracks: [Track]) -> some View {
         let ids = tracks.map(\.id)
         let chosen = stemModel ?? model.settings.defaultStemModel
+        let keep = stemOutputs ?? Set(model.settings.stemChoice.outputs(for: chosen))
+        let choice: DJStemChoice = keep == Set(chosen.stemNames) ? .all : .custom(keep)
         let stemsAs = stemsFormat ?? model.settings.stemsFormat
         let repairAs = repairFormat ?? model.settings.repairFormat
         let lowCount = tracks.filter(\.needsRepair).count
@@ -61,8 +66,8 @@ struct TrackDetailContent: View {
                     ToolCard(
                         systemImage: "square.3.layers.3d",
                         title: "Separate Stems",
-                        message: "Writes each stem to a “(Stems)” folder. A few minutes a track.",
-                        jobs: tracks.compactMap { model.job(for: $0.id, kind: .stems(chosen)) },
+                        message: "Writes “Artist - Title (Vocals)” and the rest to a “(Stems)” folder. A few minutes a track.",
+                        jobs: tracks.compactMap { model.job(for: $0.id, kind: .stems(chosen, choice)) },
                         multi: tracks.count > 1
                     ) {
                         VStack(alignment: .leading, spacing: 6) {
@@ -73,15 +78,17 @@ struct TrackDetailContent: View {
                                 .djText(.caption)
                                 .foregroundStyle(DJColor.mutedForeground)
                                 .fixedSize(horizontal: false, vertical: true)
+                            StemPicker(model: chosen, selection: Binding(get: { keep }, set: { stemOutputs = $0 }))
+                                .padding(.top, 2)
                         }
                     } action: {
                         VStack(spacing: 6) {
                             Button(tracks.count > 1 ? "Separate \(tracks.count) Tracks" : "Separate Stems", systemImage: "play.fill") {
-                                model.separateStems(ids, model: chosen, format: stemsAs)
+                                model.separateStems(ids, model: chosen, choice: choice, format: stemsAs)
                             }
                             // The suggested repair gets the strong button.
                             .buttonStyle(.dj(lowCount > 0 ? .outline : .primary, fullWidth: true))
-                            .disabled(allBusy(ids, kind: .stems(chosen)))
+                            .disabled(allBusy(ids, kind: .stems(chosen, choice)) || keep.isEmpty)
                             FormatMenu(selection: Binding(get: { stemsAs }, set: { stemsFormat = $0 }),
                                        defaultFormat: model.settings.stemsFormat)
                         }
@@ -89,7 +96,7 @@ struct TrackDetailContent: View {
 
                     ToolCard(
                         systemImage: "wand.and.stars",
-                        title: "Repair with Apollo",
+                        title: "Repair Audio",
                         message: "Rebuilds the high end that lossy encoding cut off and writes a new file. The original stays as it is. Takes about half the track's length or less on an M-series Air (a 4-minute track ≈ 1½–2 minutes).",
                         jobs: tracks.compactMap { model.job(for: $0.id, kind: .repair) },
                         multi: tracks.count > 1,
@@ -212,7 +219,7 @@ struct TrackDetailContent: View {
     }
 
     private func repairTitle(tracks: [Track], lowCount: Int) -> String {
-        if tracks.count == 1 { return "Repair with Apollo" }
+        if tracks.count == 1 { return "Repair Audio" }
         if lowCount > 0 { return "Repair \(DJFormat.count(lowCount, "Track"))" }
         return "Repair \(tracks.count) Tracks"
     }
@@ -249,6 +256,7 @@ private struct TrackHeader: View {
 }
 
 private struct SelectionHeader: View {
+    @Environment(AppModel.self) private var model
     let tracks: [Track]
 
     var body: some View {
@@ -260,6 +268,20 @@ private struct SelectionHeader: View {
                 Text(breakdown)
                     .djText(.body)
                     .foregroundStyle(DJColor.mutedForeground)
+            }
+            let pending = tracks.filter(\.hasPendingIdentity)
+            if !pending.isEmpty {
+                HStack(spacing: DJSpace.md) {
+                    Image(systemName: "shazam.logo").foregroundStyle(DJColor.ring)
+                    Text("Track ID matched \(DJFormat.count(pending.count, "track")). Check them one by one, or apply them all.")
+                        .djText(.body)
+                        .foregroundStyle(DJColor.foreground)
+                    Spacer(minLength: DJSpace.md)
+                    Button("Apply \(pending.count)", systemImage: "checkmark") { model.applyIdentity(pending.map(\.id)) }
+                        .buttonStyle(.dj(.primary, size: .small))
+                        .disabled(pending.allSatisfy { model.applying.contains($0.id) })
+                }
+                .djCard(padding: DJSpace.md)
             }
             VStack(spacing: 0) {
                 ForEach(Array(tracks.prefix(8).enumerated()), id: \.element.id) { index, track in
@@ -685,7 +707,7 @@ struct FormatMenu: View {
 /// Repair saved as MP3: the encoder cuts off the very highs Apollo rebuilt.
 struct MP3RepairHint: View {
     var body: some View {
-        Label("MP3 cuts the highs Apollo just rebuilt (even 320 kbps stops around 20 kHz). Lossless is recommended.",
+        Label("MP3 cuts the highs the repair just rebuilt (even 320 kbps stops around 20 kHz). Lossless is recommended.",
               systemImage: "exclamationmark.triangle")
             .djText(.caption)
             .foregroundStyle(DJColor.marker)
@@ -733,7 +755,7 @@ private struct ResultRow: View {
                 switch result.kind {
                 case .stems(let model, _, let stems):
                     HStack(spacing: 4) {
-                        ForEach(model.stemNames.filter { stems[$0] != nil }, id: \.self) { name in
+                        ForEach((model.stemNames + [DJStemChoice.instrumental]).filter { stems[$0] != nil }, id: \.self) { name in
                             Text(name)
                                 .font(.dj(11, weight: 500))
                                 .foregroundStyle(DJColor.foreground)
@@ -779,7 +801,7 @@ private struct ResultRow: View {
     private var title: String {
         switch result.kind {
         case .stems(let model, _, _): "Stems · \(model.modelName)"
-        case .repaired: "Repaired with Apollo"
+        case .repaired: "Repaired"
         case .normalized: "Normalized"
         }
     }
@@ -922,6 +944,58 @@ struct LoudnessSummary: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+    }
+}
+
+/// Which stems to keep: a chip per stem plus Instrumental, and two presets.
+private struct StemPicker: View {
+    let model: DJStemModel
+    @Binding var selection: Set<String>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: DJSpace.sm) {
+                Text("Keep").djText(.caption).foregroundStyle(DJColor.mutedForeground)
+                Spacer(minLength: 0)
+                DJLinkButton("All") { selection = Set(model.stemNames) }
+                DJLinkButton("Acapella + Instrumental") { selection = ["vocals", DJStemChoice.instrumental] }
+            }
+            FlowChips(items: model.stemNames + [DJStemChoice.instrumental], selection: $selection)
+        }
+    }
+}
+
+private struct FlowChips: View {
+    let items: [String]
+    @Binding var selection: Set<String>
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { chips(items) }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) { chips(Array(items.prefix((items.count + 1) / 2))) }
+                HStack(spacing: 4) { chips(Array(items.dropFirst((items.count + 1) / 2))) }
+            }
+        }
+    }
+
+    private func chips(_ names: [String]) -> some View {
+        ForEach(names, id: \.self) { name in
+            let on = selection.contains(name)
+            Button {
+                if on { selection.remove(name) } else { selection.insert(name) }
+            } label: {
+                Text(name.capitalized)
+                    .font(.dj(11, weight: on ? 600 : 500))
+                    .foregroundStyle(on ? DJColor.primaryForeground : DJColor.mutedForeground)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(on ? DJColor.primary : DJColor.muted))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(on ? .isSelected : [])
         }
     }
 }

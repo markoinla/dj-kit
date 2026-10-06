@@ -7,7 +7,9 @@ import Foundation
 struct Job: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         case quality
-        case stems(DJStemModel)
+        /// Track ID: Shazam + Apple Music. Light, network-bound.
+        case identify
+        case stems(DJStemModel, DJStemChoice)
         case repair
         /// Measure only (for the Normalize card); not shown in the queue.
         case loudness
@@ -17,7 +19,7 @@ struct Job: Identifiable, Equatable, Sendable {
         var isHeavy: Bool {
             switch self {
             case .stems, .repair: true
-            case .quality, .loudness, .normalize: false
+            case .quality, .identify, .loudness, .normalize: false
             }
         }
 
@@ -31,13 +33,14 @@ struct Job: Identifiable, Equatable, Sendable {
 
         /// Runs in the background for the UI; the queue only lists it while
         /// it runs or when it failed.
-        var isBackground: Bool { self == .quality || self == .loudness }
+        var isBackground: Bool { self == .quality || self == .identify || self == .loudness }
 
         var title: String {
             switch self {
             case .quality: "Quality check"
-            case .stems(let model): "Stems · \(model.modelName)"
-            case .repair: "Apollo repair"
+            case .identify: "Track ID"
+            case .stems(let model, _): "Stems · \(model.modelName)"
+            case .repair: "Repair"
             case .loudness: "Loudness"
             case .normalize(let target): "Normalize to \(DJFormat.lufs(target.lufs, decimals: 0))"
             }
@@ -46,6 +49,7 @@ struct Job: Identifiable, Equatable, Sendable {
         var systemImage: String {
             switch self {
             case .quality: "waveform.badge.magnifyingglass"
+            case .identify: "shazam.logo"
             case .stems: "square.3.layers.3d"
             case .repair: "wand.and.stars"
             case .loudness, .normalize: "speaker.wave.2"
@@ -55,7 +59,7 @@ struct Job: Identifiable, Equatable, Sendable {
         /// Same tool, any stem model.
         func sameTool(as other: Kind) -> Bool {
             switch (self, other) {
-            case (.quality, .quality), (.repair, .repair), (.stems, .stems), (.loudness, .loudness),
+            case (.quality, .quality), (.identify, .identify), (.repair, .repair), (.stems, .stems), (.loudness, .loudness),
                  (.normalize, .normalize): true
             default: false
             }
@@ -93,7 +97,7 @@ struct Job: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 
-    /// "Stems · htdemucs · AIFF", "Apollo repair · MP3 320".
+    /// "Stems · htdemucs · AIFF", "Repair · MP3 320".
     var title: String {
         guard let format else { return kind.title }
         return "\(kind.title) · \(format.shortTitle)"
@@ -106,6 +110,7 @@ struct Job: Identifiable, Equatable, Sendable {
         case .running:
             let verb = switch kind {
             case .quality: "Checking"
+            case .identify: "Listening"
             case .stems: "Separating"
             case .repair: "Repairing"
             case .loudness: "Measuring"

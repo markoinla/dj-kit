@@ -84,8 +84,16 @@ installer (no Homebrew, no sudo) and keeps uv's cache, Python and venv under
 ## app/ — the SwiftUI shell (XcodeGen, `app/project.yml`)
 
 Depends on QualityKit, StemsKit, ApolloMLX, AudioExport and LoudnessKit by local path. Drop files or folders in; each track gets
-actions Check Quality, Separate Stems, Repair (Apollo), Normalize Loudness; a job queue shows progress;
-results land in the output folder with Reveal in Finder. Design follows Wax Studio
+actions Track ID, Check Quality, Separate Stems, Repair (Apollo), Normalize Loudness; a job queue shows progress;
+results land in the output folder with Reveal in Finder.
+
+**Track ID** (`Engines/TrackIdentifier.swift`, behind `TrackIdentifying`): ShazamKit listens to three
+12 s windows (30/50/70 % in), the windows vote, MusicKit's catalog fills in album, label, release
+date, ISRC and 1400 px artwork, preferring the release closest in length to the file. Runs on drop
+(Settings ▸ Track ID), two at a time. The match waits on the track (`Track.identity`) until Apply:
+`AudioRetagger` merges the tags into the file without re-encoding (BPM, key and the like stay) and,
+by default, renames it `Artist - Title.<ext>` in place. Needs the ShazamKit and MusicKit App
+Services on `la.marko.djtools` and the team-signed build. Design follows Wax Studio
 (`~/Projects/wax-audio/apps/mac`, see its `WaxMac/DesignSystem`).
 
 ## Packages/ApolloMLX — native port of Apollo (MLX Swift), the app's repair engine
@@ -137,8 +145,12 @@ through (normalization); with a gain, lossless output is always 24-bit. No clipp
 the caller keeps peaks below full scale. The source may be any file AVAudioFile decodes.
 
 The app (`ResultWriter`) runs each heavy engine into a scratch folder, exports, deletes the
-WAVs: `<out>/<track> (Stems)/<stem>.<ext>` and `<out>/<track> (Apollo).<ext>`. AIFF is the
-default for both (Rekordbox reads its tags and artwork).
+WAVs: `<out>/<name> (Stems)/<name> (Vocals).<ext>`, `<out>/<name> (Repaired).<ext>` and
+`<out>/<name> (Normalized).<ext>`, where `<name>` is "Artist - Title" when the tags (or a Track ID
+match) have both, else the file name. Results are tagged with the file's tags plus the match. A
+separation keeps the stems the job picks (`DJStemChoice`); "instrumental" is every stem but the
+vocals summed. AIFF is the default (Rekordbox reads its tags and artwork); Settings ▸ General's
+"Save files as" sets every tool's type at once.
 
 ## Packages/LoudnessKit — loudness measurement and normalization (pure Swift: AVFoundation + Accelerate)
 
@@ -175,6 +187,6 @@ ceiling, the gain is capped there (which is a cut when the source already peaks 
 The app's flow (`ResultWriter.normalize`): measure the source, plan, then `AudioExporter.export`
 the source itself with `gainDB` to `<out>/<track> (Normalized).<ext>` (Settings default AIFF;
 title suffixed " (Normalized)"). Settings' "Also normalize repaired tracks" does the same to
-Apollo's scratch WAV as the repair's last step (`<track> (Apollo).<ext>`). Stems are never
+Apollo's scratch WAV as the repair's last step (`<track> (Repaired).<ext>`). Stems are never
 normalized: they must keep their relative levels to sum back to the mix. Measuring is never
 part of the automatic quality check (it needs a full decode); the Normalize card measures lazily.

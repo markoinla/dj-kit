@@ -18,3 +18,4 @@ __pycache__/
 *.key
 *.pem
 app/DJTools/Info.plist
+app/build/

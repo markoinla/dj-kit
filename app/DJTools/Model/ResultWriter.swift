@@ -1,18 +1,22 @@
+import Accelerate
 import AudioExport
+@preconcurrency import AVFoundation
 import Foundation
 
 /// Runs a heavy engine and saves what it made as the chosen file type.
 ///
 /// The engines keep writing their native output (StemsKit's 24-bit WAVs,
 /// Apollo's 24-bit WAV) — here into a scratch folder on the output folder's
-/// volume. `AudioExport` then converts each WAV, copies the source track's
-/// title/artist/album/artwork onto it (title suffixed " (Vocals)",
-/// " (Repaired)", …) and the scratch folder is removed, however the job ends.
+/// volume. `AudioExport` then converts each WAV, tags it with the caller's
+/// `tags` (the file's own, with Track ID's match over them; title suffixed
+/// " (Vocals)", " (Repaired)", …) and the scratch folder is removed, however
+/// the job ends.
 ///
-/// Final names: `<out>/<track> (Stems)/<stem>.<ext>` (replacing an earlier
-/// folder, as StemsKit does), `<out>/<track> (Apollo).<ext>` and
-/// `<out>/<track> (Normalized).<ext>` (numbered when taken). Used by
-/// `AppModel` and `-selfTest`.
+/// Names start from "Artist - Title" when the tags have both, else the file
+/// name: `<out>/<name> (Stems)/<name> (Vocals).<ext>` (replacing an earlier
+/// folder), `<out>/<name> (Repaired).<ext>` and `<out>/<name> (Normalized).<ext>`
+/// (numbered when taken), so stems are easy to find once they're in
+/// Rekordbox or Serato. Used by `AppModel` and `-selfTest`.
 ///
 /// Normalizing is LoudnessKit's measurement plus one gain change applied by
 /// AudioExport while it encodes: no limiter, no compression, and no scratch
@@ -40,8 +44,8 @@ enum ResultWriter {
     }
 
     static func separate(
-        input: URL, model: DJStemModel, format: AudioFileFormat, outputFolder: URL,
-        engine: any StemSeparating,
+        input: URL, model: DJStemModel, choice: DJStemChoice = .all, format: AudioFileFormat,
+        tags: AudioTags, outputFolder: URL, engine: any StemSeparating,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
     ) async throws -> DJStemResult {
@@ -50,26 +54,40 @@ enum ResultWriter {
         defer { try? fm.removeItem(at: scratch) }
         let share = engineShare(format)
         let trackName = input.deletingPathExtension().lastPathComponent
+        let base = TrackTags.fileName(TrackTags.displayName(tags, fallback: trackName))
 
         let raw = try await engine.separate(
             input: input, model: model, outputDirectory: scratch, progress: { progress($0 * share) }
         )
         try Task.checkCancellation()
-        MainHop.wrap(status)("Saving \(format.shortTitle)")
+        let onStatus = MainHop.wrap(status)
 
-        let tags = format.writesTags ? await AudioTags.read(from: input) : nil
-        let folderName = "\(trackName) (Stems)"
+        var sources = raw.stems
+        let outputs = choice.outputs(for: model)
+        if outputs.contains(DJStemChoice.instrumental) {
+            onStatus("Mixing the instrumental")
+            let parts = model.stemNames.filter { $0 != "vocals" }.compactMap { raw.stems[$0] }
+            let mixed = scratch.appending(path: "instrumental.wav")
+            try await Task.detached(priority: .userInitiated) { try StemMixer.mix(parts, to: mixed) }.value
+            sources[DJStemChoice.instrumental] = mixed
+        }
+        try Task.checkCancellation()
+        onStatus("Saving \(format.shortTitle)")
+
+        let folderName = "\(base) (Stems)"
         let staging = scratch.appending(path: "export", directoryHint: .isDirectory)
             .appending(path: folderName, directoryHint: .isDirectory)
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-        let names = model.stemNames.filter { raw.stems[$0] != nil }
-            + raw.stems.keys.filter { !model.stemNames.contains($0) }.sorted()
+        let names = outputs.filter { sources[$0] != nil }
+        func fileName(_ stem: String) -> String { "\(base) (\(stem.capitalized)).\(format.fileExtension)" }
         let onMain = MainHop.wrap(progress)
         for (index, name) in names.enumerated() {
             let count = Double(names.count)
+            var stemTags = tags.suffixingTitle(" (\(name.capitalized))", fallbackTitle: trackName)
+            stemTags.comment = "\(name.capitalized) stem · \(model.modelName)"
             _ = try await AudioExporter.export(
-                raw.stems[name]!, to: staging.appending(path: "\(name).\(format.fileExtension)"), format: format,
-                tags: tags?.suffixingTitle(" (\(name.capitalized))", fallbackTitle: trackName),
+                sources[name]!, to: staging.appending(path: fileName(name)), format: format,
+                tags: format.writesTags ? stemTags : nil,
                 removingSource: true,
                 progress: { onMain(share + (1 - share) * (Double(index) + $0) / count) }
             )
@@ -80,15 +98,15 @@ enum ResultWriter {
         if fm.fileExists(atPath: final.path) { try fm.removeItem(at: final) }
         try fm.moveItem(at: staging, to: final)
         return DJStemResult(stems: Dictionary(uniqueKeysWithValues: names.map {
-            ($0, final.appending(path: "\($0).\(format.fileExtension)"))
+            ($0, final.appending(path: fileName($0)))
         }))
     }
 
-    /// Repairs with Apollo and saves `<out>/<track> (Apollo).<ext>`; with
+    /// Repairs with Apollo and saves `<out>/<track> (Repaired).<ext>`; with
     /// `normalize`, Apollo's output is measured and the plan's gain applied
     /// as it's saved (the last step, so the repair itself is untouched).
     static func repair(
-        input: URL, format: AudioFileFormat, outputFolder: URL,
+        input: URL, format: AudioFileFormat, tags: AudioTags, outputFolder: URL,
         engine: any ApolloRepairing, normalize: NormalizeStep? = nil,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
@@ -101,7 +119,7 @@ enum ResultWriter {
         let onStatus = MainHop.wrap(status)
 
         let raw = try await engine.repair(
-            input: input, output: scratch.appending(path: "\(trackName) (Apollo).wav"),
+            input: input, output: scratch.appending(path: "\(trackName) (Repaired).wav"),
             progress: { progress($0 * share) }, status: status
         )
         try Task.checkCancellation()
@@ -118,12 +136,12 @@ enum ResultWriter {
         let base = share + measuring
         onStatus("Saving \(format.shortTitle)")
 
-        let tags = format.writesTags ? await AudioTags.read(from: input) : nil
-        let destination = AppModel.unique(outputFolder.appending(path: "\(trackName) (Apollo).\(format.fileExtension)"))
+        let name = TrackTags.fileName(TrackTags.displayName(tags, fallback: trackName))
+        let destination = AppModel.unique(outputFolder.appending(path: "\(name) (Repaired).\(format.fileExtension)"))
         let onMain = MainHop.wrap(progress)
         let url = try await AudioExporter.export(
             raw, to: destination, format: format,
-            tags: tags?.suffixingTitle(" (Repaired)", fallbackTitle: trackName),
+            tags: format.writesTags ? tags.suffixingTitle(" (Repaired)", fallbackTitle: trackName) : nil,
             gainDB: plan?.gainDB ?? 0,
             removingSource: true,
             progress: { onMain(base + (1 - base) * $0) }
@@ -136,7 +154,7 @@ enum ResultWriter {
     /// would pass the ceiling. Tags copied, title suffixed " (Normalized)".
     /// The original is never touched.
     static func normalize(
-        input: URL, target: DJLoudnessTarget, format: AudioFileFormat, outputFolder: URL,
+        input: URL, target: DJLoudnessTarget, format: AudioFileFormat, tags: AudioTags, outputFolder: URL,
         engine: any LoudnessMeasuring,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
@@ -152,12 +170,12 @@ enum ResultWriter {
         onStatus("Saving \(format.shortTitle)")
 
         let trackName = input.deletingPathExtension().lastPathComponent
-        let tags = format.writesTags ? await AudioTags.read(from: input) : nil
-        let destination = AppModel.unique(outputFolder.appending(path: "\(trackName) (Normalized).\(format.fileExtension)"))
+        let base = TrackTags.fileName(TrackTags.displayName(tags, fallback: trackName))
+        let destination = AppModel.unique(outputFolder.appending(path: "\(base) (Normalized).\(format.fileExtension)"))
         let onMain = MainHop.wrap(progress)
         let url = try await AudioExporter.export(
             input, to: destination, format: format,
-            tags: tags?.suffixingTitle(" (Normalized)", fallbackTitle: trackName),
+            tags: format.writesTags ? tags.suffixingTitle(" (Normalized)", fallbackTitle: trackName) : nil,
             gainDB: plan.gainDB,
             progress: { onMain(measureShare + (1 - measureShare) * $0) }
         )
@@ -176,5 +194,42 @@ enum ResultWriter {
         let folder = fm.temporaryDirectory.appending(path: "DJTools-\(UUID().uuidString)", directoryHint: .isDirectory)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
+    }
+}
+
+/// Sums stems back together (the instrumental: every stem but the vocals).
+enum StemMixer {
+    /// Writes the sample-wise sum of `sources` (same rate and channels, as
+    /// Demucs writes them) to `destination` as a 32-bit float WAV. Nothing is
+    /// limited: the stems sum back to the mix, which already fit.
+    static func mix(_ sources: [URL], to destination: URL) throws {
+        let files = try sources.map { try AVAudioFile(forReading: $0, commonFormat: .pcmFormatFloat32, interleaved: false) }
+        guard let first = files.first else { throw AppError("There were no stems to mix.") }
+        let format = first.processingFormat
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: format.channelCount, AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false,
+        ]
+        let output = try AVAudioFile(forWriting: destination, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let chunk: AVAudioFrameCount = 1 << 15
+        guard let sum = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk),
+              let part = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else {
+            throw AppError("Couldn't mix the stems.")
+        }
+        let channels = Int(format.channelCount)
+        while first.framePosition < first.length {
+            try Task.checkCancellation()
+            try first.read(into: sum, frameCount: chunk)
+            if sum.frameLength == 0 { break }
+            for file in files.dropFirst() where file.framePosition < file.length {
+                try file.read(into: part, frameCount: sum.frameLength)
+                let n = vDSP_Length(min(part.frameLength, sum.frameLength))
+                for c in 0..<channels {
+                    vDSP_vadd(sum.floatChannelData![c], 1, part.floatChannelData![c], 1, sum.floatChannelData![c], 1, n)
+                }
+            }
+            try output.write(from: sum)
+        }
     }
 }

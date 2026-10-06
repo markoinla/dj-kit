@@ -16,7 +16,7 @@ playback-only, which is why Normalize exists (it bakes the level into a copy).
 - MLX packages need `xcodebuild` (it compiles the Metal shaders); plain `swift build`
   links but fails at runtime without the metallib.
 - Design reference: Wax Studio, `~/Projects/wax-audio/apps/mac`.
-- No signing yet.
+- Signed with Apple Development (team M44R9APYMG, App ID `la.marko.djtools`, ShazamKit + MusicKit App Services). A box without that cert builds with `CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=` (no Shazam).
 - Building MLX code needs Xcode's Metal toolchain (`xcodebuild -downloadComponent MetalToolchain`,
   no sudo; already installed on mac-ci). Don't run stems and Apollo together on a 16 GB Mac:
   stems peak around 5.4 GB, Apollo around 2.9 GB, and the box swaps hard.

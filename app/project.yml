@@ -38,10 +38,11 @@ settings:
     # Apple Silicon only (MLX).
     ARCHS: arm64
     EXCLUDED_ARCHS: x86_64
-    # No signing yet: ad-hoc.
-    CODE_SIGN_IDENTITY: "-"
+    # Signed with the team so ShazamKit and MusicKit (App Services on the
+    # App ID la.marko.djtools) accept the app. No provisioning profile needed.
+    CODE_SIGN_IDENTITY: "Apple Development"
     CODE_SIGN_STYLE: Manual
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: M44R9APYMG
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     GENERATE_INFOPLIST_FILE: NO
     MARKETING_VERSION: "0.1.0"

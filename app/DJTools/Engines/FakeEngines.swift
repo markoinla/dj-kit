@@ -106,7 +106,7 @@ actor FakeApolloRuntime: ApolloRepairing {
 
     func install(progress: @escaping @Sendable (String) -> Void) async throws {
         let steps: [(String, Int)] = [
-            ("Downloading Apollo weights (66 MB)", 12),
+            ("Downloading the repair model (66 MB)", 12),
             ("Verifying weights", 3),
             ("Converting weights", 5),
         ]
@@ -130,7 +130,7 @@ actor FakeApolloRuntime: ApolloRepairing {
         status: @escaping @Sendable (String) -> Void
     ) async throws -> URL {
         guard FileManager.default.fileExists(atPath: marker.path) else {
-            throw FakeEngineError("Apollo isn't set up yet.")
+            throw FakeEngineError("Repair isn't set up yet.")
         }
         let steps = 40
         progress(0)
@@ -237,5 +237,26 @@ enum FakeAudio {
         data.append(contentsOf: Array("data".utf8)); append(dataSize)
         data.append(Data(count: Int(dataSize)))
         try data.write(to: url, options: .atomic)
+    }
+}
+
+/// Reads "Artist - Title" out of the file name after a short wait; no match
+/// for names without " - ".
+struct FakeTrackIdentifier: TrackIdentifying {
+    var speed: Double = 1
+
+    func identify(_ url: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> DJTrackIdentity? {
+        for step in 0...3 {
+            progress(Double(step) / 3)
+            if step < 3 { try await Task.sleep(for: .milliseconds(Int(400 / speed))) }
+        }
+        let name = url.deletingPathExtension().lastPathComponent
+        let parts = name.components(separatedBy: " - ")
+        guard parts.count >= 2 else { return nil }
+        return DJTrackIdentity(
+            title: parts.dropFirst().joined(separator: " - "), artist: parts[0],
+            album: "Demo Album", label: "Demo Records", genre: "House", releaseDate: "2024-05-17",
+            durationSeconds: 200 + Double(FakeHash.of(name) % 260), hits: 3, listens: 3
+        )
     }
 }

@@ -42,6 +42,11 @@ final class AppModel {
 
     static let maxConcurrentChecks = 4
     static let maxConcurrentDecodes = 2
+    /// Track ID lookups at once (network-bound; Apple throttles bursts).
+    static let maxConcurrentIdentify = 2
+
+    /// Tracks whose Track ID match is being written right now.
+    private(set) var applying: Set<Track.ID> = []
 
     @ObservationIgnored private let store: LibraryStore?
     @ObservationIgnored private var tasks: [Job.ID: Task<Void, Never>] = [:]
@@ -94,6 +99,7 @@ final class AppModel {
         tracks.append(contentsOf: added)
         save()
         checkQuality(added.map(\.id))
+        if settings.identifyOnAdd { identify(added.map(\.id)) }
         return added.map(\.id)
     }
 
@@ -151,11 +157,73 @@ final class AppModel {
         }
     }
 
-    /// Separates stems, saved as `format` (Settings' choice when nil).
-    func separateStems(_ ids: [Track.ID], model: DJStemModel, format: AudioFileFormat? = nil) {
+    /// Separates stems, keeping `choice` (Settings' when nil), saved as
+    /// `format` (Settings' choice when nil).
+    func separateStems(_ ids: [Track.ID], model: DJStemModel, choice: DJStemChoice? = nil, format: AudioFileFormat? = nil) {
         let format = format ?? settings.stemsFormat
-        for id in ids { enqueue(.stems(model), for: id, format: format) }
+        let choice = choice ?? settings.stemChoice
+        for id in ids { enqueue(.stems(model, choice), for: id, format: format) }
         if !ids.isEmpty { isShowingJobs = true }
+    }
+
+    // MARK: - Track ID
+
+    /// Listens to each track with Shazam and looks it up in Apple Music.
+    /// The match waits for Apply (or is applied straight away, when
+    /// Settings says so and it's a sure one).
+    func identify(_ ids: [Track.ID]) {
+        for id in ids {
+            updateTrack(id) { $0.identifyError = nil }
+            enqueue(.identify, for: id)
+        }
+    }
+
+    /// Writes each track's match into its file (no re-encoding; other tags
+    /// such as BPM and key stay) and, when Settings says so, renames it
+    /// "Artist - Title.ext" in its folder. Do this before importing into
+    /// Rekordbox: it finds tracks by path.
+    func applyIdentity(_ ids: [Track.ID]) {
+        let targets = ids.filter { id in
+            guard let track = track(id) else { return false }
+            return track.identity != nil && track.fileExists && !applying.contains(id)
+        }
+        guard !targets.isEmpty else { return }
+        applying.formUnion(targets)
+        let rename = settings.renameOnApply
+        Task {
+            var failures: [String] = []
+            for id in targets {
+                defer { applying.remove(id) }
+                guard let track = track(id), let identity = track.identity else { continue }
+                do {
+                    let tags = await TrackTags.tags(for: identity)
+                    var destination: URL?
+                    if rename {
+                        let name = TrackTags.fileName(TrackTags.displayName(tags, fallback: track.name))
+                        let candidate = track.url.deletingLastPathComponent().appending(path: "\(name).\(track.url.pathExtension)")
+                        if candidate.standardizedFileURL.path != track.url.standardizedFileURL.path {
+                            destination = Self.unique(candidate)
+                        }
+                    }
+                    let url = try await AudioRetagger.retag(track.url, with: tags, moveTo: destination)
+                    updateTrack(id) {
+                        $0.url = url
+                        $0.fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+                        $0.identityStatus = .applied
+                    }
+                } catch {
+                    failures.append("\(track.name): \(error.localizedDescription)")
+                }
+            }
+            if !failures.isEmpty {
+                notice = "Couldn't write the tags. " + failures.joined(separator: " · ")
+            }
+        }
+    }
+
+    /// "Not This Track": the match is kept out of the tags and names.
+    func dismissIdentity(_ ids: [Track.ID]) {
+        for id in ids { updateTrack(id) { $0.identityStatus = .dismissed } }
     }
 
     /// Saves a copy of each track at Settings' target loudness (pure gain,
@@ -262,6 +330,7 @@ final class AppModel {
         switch job.kind {
         case .repair: repair([job.trackID], format: job.format)
         case .quality: checkQuality([job.trackID])
+        case .identify: identify([job.trackID])
         case .loudness: measureLoudnessAgain(job.trackID)
         case .stems, .normalize: enqueue(job.kind, for: job.trackID, format: job.format)
         }
@@ -281,6 +350,10 @@ final class AppModel {
     private func pump() {
         let runningChecks = jobs.filter { $0.kind == .quality && $0.state == .running }.count
         for job in jobs.filter({ $0.kind == .quality && $0.state == .queued }).prefix(max(0, Self.maxConcurrentChecks - runningChecks)) {
+            start(job.id)
+        }
+        let runningIDs = jobs.filter { $0.kind == .identify && $0.state == .running }.count
+        for job in jobs.filter({ $0.kind == .identify && $0.state == .queued }).prefix(max(0, Self.maxConcurrentIdentify - runningIDs)) {
             start(job.id)
         }
         let runningDecodes = jobs.filter { $0.kind.isDecoding && $0.state == .running }.count
@@ -348,10 +421,26 @@ final class AppModel {
                 updateTrack(track.id) { $0.quality = report; $0.qualityError = nil }
                 finish(job.id, .finished)
 
-            case .stems(let model):
+            case .identify:
+                let identity = try await engines.identifier.identify(track.url, progress: progress)
+                guard isRunning(job.id) else { return }
+                updateTrack(track.id) {
+                    $0.identity = identity
+                    $0.identifiedAt = Date()
+                    $0.identityStatus = nil
+                    $0.identifyError = nil
+                }
+                finish(job.id, .finished)
+                if settings.autoApplyMatches, let updated = self.track(track.id),
+                   updated.identity?.isStrong == true, !updated.identityLengthMismatch {
+                    applyIdentity([track.id])
+                }
+
+            case .stems(let model, let choice):
                 let output = try outputFolder()
                 let result = try await ResultWriter.separate(
-                    input: track.url, model: model, format: job.format ?? settings.stemsFormat,
+                    input: track.url, model: model, choice: choice, format: job.format ?? settings.stemsFormat,
+                    tags: await TrackTags.forResults(track),
                     outputFolder: output, engine: engines.stems, progress: progress, status: status
                 )
                 guard isRunning(job.id) else { return }
@@ -367,7 +456,7 @@ final class AppModel {
                     ? ResultWriter.NormalizeStep(target: settings.loudnessTarget, meter: engines.loudness) : nil
                 let saved = try await ResultWriter.repair(
                     input: track.url, format: job.format ?? settings.repairFormat,
-                    outputFolder: try outputFolder(), engine: engines.apollo, normalize: normalize,
+                    tags: await TrackTags.forResults(track), outputFolder: try outputFolder(), engine: engines.apollo, normalize: normalize,
                     progress: progress, status: status
                 )
                 guard isRunning(job.id) else { return }
@@ -385,7 +474,7 @@ final class AppModel {
             case .normalize(let target):
                 let saved = try await ResultWriter.normalize(
                     input: track.url, target: target, format: job.format ?? settings.normalizeFormat,
-                    outputFolder: try outputFolder(), engine: engines.loudness, progress: progress, status: status
+                    tags: await TrackTags.forResults(track), outputFolder: try outputFolder(), engine: engines.loudness, progress: progress, status: status
                 )
                 guard isRunning(job.id), let plan = saved.plan else { return }
                 updateTrack(track.id) {
@@ -402,6 +491,7 @@ final class AppModel {
             let message = error.localizedDescription
             if job.kind == .quality { updateTrack(track.id) { $0.qualityError = message } }
             if job.kind == .loudness { updateTrack(track.id) { $0.loudnessError = message } }
+            if job.kind == .identify { updateTrack(track.id) { $0.identifyError = message } }
             finish(job.id, .failed(message))
         }
     }
@@ -467,7 +557,7 @@ final class AppModel {
         do {
             try await engines.apollo.reset()
         } catch {
-            notice = "Couldn't reset Apollo: \(error.localizedDescription)"
+            notice = "Couldn't remove the repair model: \(error.localizedDescription)"
         }
         apolloState = await engines.apollo.state()
     }

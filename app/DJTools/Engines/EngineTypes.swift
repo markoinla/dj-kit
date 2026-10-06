@@ -127,3 +127,53 @@ struct DJLoudnessTarget: Sendable, Codable, Equatable, Hashable {
     var lufs: Double
     var ceilingDBTP: Double
 }
+
+// MARK: - Track ID
+
+/// What Track ID found for a file: Shazam's match, filled in from the Apple
+/// Music catalog (album, label, release date, artwork).
+struct DJTrackIdentity: Sendable, Codable, Equatable {
+    var title: String
+    var artist: String
+    var album: String?
+    var label: String?
+    var genre: String?
+    /// "YYYY-MM-DD".
+    var releaseDate: String?
+    var isrc: String?
+    /// The catalog release's length.
+    var durationSeconds: TimeInterval?
+    var artworkURL: URL?
+    var appleMusicURL: URL?
+    var shazamURL: URL?
+    /// Listens that matched this track, of `listens`.
+    var hits: Int
+    var listens: Int
+
+    var year: String? { releaseDate.map { String($0.prefix(4)) } }
+    /// Two listens or more agree.
+    var isStrong: Bool { hits >= 2 }
+}
+
+/// Which stems a separation keeps. Demucs always makes all of them; this
+/// picks the files written. "instrumental" is every stem but the vocals,
+/// mixed back together.
+enum DJStemChoice: Sendable, Codable, Hashable {
+    case all
+    case acapellaInstrumental
+    case custom(Set<String>)
+
+    static let instrumental = "instrumental"
+
+    /// The outputs for `model`, in the UI's order (never empty).
+    func outputs(for model: DJStemModel) -> [String] {
+        let available = model.stemNames + [Self.instrumental]
+        let picked: Set<String> = switch self {
+        case .all: Set(model.stemNames)
+        case .acapellaInstrumental: ["vocals", Self.instrumental]
+        case .custom(let names): names
+        }
+        let outputs = available.filter(picked.contains)
+        return outputs.isEmpty ? model.stemNames : outputs
+    }
+}
