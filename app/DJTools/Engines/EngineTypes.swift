@@ -80,9 +80,9 @@ struct DJStemResult: Sendable, Codable, Equatable {
     var stems: [String: URL]
 }
 
-// MARK: - ApolloBridge
+// MARK: - Apollo
 
-/// Mirrors `ApolloBridge.ApolloSetupState`.
+/// Apollo's setup: the model weights downloaded and converted, or not.
 enum DJApolloSetupState: Sendable, Equatable {
     case notInstalled
     case installing(String)

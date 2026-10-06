@@ -88,7 +88,7 @@ struct FakeStemSeparator: StemSeparating {
 
 /// "Installs" in a few seconds of status lines and remembers that with a
 /// marker file under `<supportDirectory>/fake-engines/` (never in the real
-/// `runtime/`). A repair counts up, then writes a silent WAV to `output`.
+/// `models/`). A repair counts up, then writes a silent WAV to `output`.
 actor FakeApolloRuntime: ApolloRepairing {
     private let marker: URL
     private let speed: Double
@@ -106,11 +106,9 @@ actor FakeApolloRuntime: ApolloRepairing {
 
     func install(progress: @escaping @Sendable (String) -> Void) async throws {
         let steps: [(String, Int)] = [
-            ("Downloading uv", 4),
-            ("Installing Python 3.12", 6),
-            ("Installing PyTorch and dependencies", 14),
-            ("Downloading Apollo model weights", 10),
-            ("Checking the model", 4),
+            ("Downloading Apollo weights (66 MB)", 12),
+            ("Verifying weights", 3),
+            ("Converting weights", 5),
         ]
         defer { installing = nil }
         for (message, ticks) in steps {
@@ -138,7 +136,8 @@ actor FakeApolloRuntime: ApolloRepairing {
         progress(0)
         status("Loading model")
         for step in 1...steps {
-            if step == 4 { status("Repairing on MPS") }
+            if step == 4 { status("Repairing") }
+            if step == steps { status("Writing output") }
             try await Task.sleep(for: .seconds(8.0 / speed / Double(steps)))
             progress(Double(step) / Double(steps))
         }

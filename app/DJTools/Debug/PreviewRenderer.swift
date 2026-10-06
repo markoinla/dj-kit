@@ -25,7 +25,7 @@ enum PreviewRenderer {
         let busy = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs)
         let queue = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.queueJobs, showsJobs: true)
         let installing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.liveJobs,
-                                        apollo: .installing("Installing PyTorch and dependencies… 42%"))
+                                        apollo: .installing("Downloading Apollo weights (66 MB)"))
         let repairing = fixtures.model(tracks: fixtures.tracks, jobs: fixtures.repairJobs, apollo: .ready, showsJobs: true)
         // Settings say stems as FLAC and repairs as MP3 320: the format menus and the MP3 hint.
         let repairAsMP3 = fixtures.model(tracks: fixtures.tracks, jobs: [], apollo: .ready, settings: fixtures.mp3Settings)
@@ -285,7 +285,7 @@ struct PreviewFixtures {
     /// behind it: heavy jobs never overlap.
     var repairJobs: [Job] {
         var repair = job(burial, .repair, .running, progress: 0.31)
-        repair.statusText = "Repairing on MPS"
+        repair.statusText = "Repairing"
         return [repair, job(bicep, .stems(.htdemucs), .queued)]
     }
 

@@ -23,23 +23,21 @@ protocol StemSeparating: Sendable {
     ) async throws -> DJStemResult
 }
 
-/// `ApolloBridge.ApolloRuntime`, plus `reset()` for Settings ▸ Reset Apollo
-/// Runtime (not in the package: the adapter deletes
-/// `<supportDirectory>/runtime/`, which is where the contract keeps uv,
-/// Python and the venv).
+/// Apollo repair (`ApolloMLX.ApolloMLXRepairer` behind `ApolloMLXAdapter`),
+/// plus `reset()` for Settings ▸ Remove Apollo Model.
 protocol ApolloRepairing: Sendable {
     func state() async -> DJApolloSetupState
-    /// uv + Python + deps + weights. `progress` gets status lines for the UI.
+    /// One-time setup (the model weights). `progress` gets status lines for the UI.
     func install(progress: @escaping @Sendable (String) -> Void) async throws
-    /// `status` gets Apollo's own status lines ("Loading model",
-    /// "Repairing on MPS", …) for the queue row.
+    /// `status` gets status lines ("Loading model", "Repairing", "Writing
+    /// output") for the queue row.
     func repair(
         input: URL, output: URL,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
     ) async throws -> URL
     func cancel() async
-    /// Removes the installed runtime so the next repair sets it up again.
+    /// Removes what setup downloaded so the next repair sets it up again.
     func reset() async throws
 }
 
@@ -51,19 +49,13 @@ struct Engines: Sendable {
     /// True for the fakes: the toolbar says "Demo engines".
     var isFake: Bool
 
-    /// The real engines: QualityKit, StemsKit and ApolloBridge behind their
-    /// adapters (Engines/RealEngines.swift). Apollo runs the `apollo/` uv
-    /// project bundled in Resources; nil only if that is missing from the
-    /// bundle (a broken build), so the app falls back to the fakes.
-    static func real(supportDirectory: URL) -> Engines? {
-        guard let apolloProject = Bundle.main.url(forResource: "apollo", withExtension: nil) else {
-            NSLog("DJTools: apollo/ isn't in the app bundle; using the demo engines")
-            return nil
-        }
-        return Engines(
+    /// The real engines: QualityKit, StemsKit and ApolloMLX behind their
+    /// adapters (Engines/RealEngines.swift).
+    static func real(supportDirectory: URL) -> Engines {
+        Engines(
             quality: QualityKitAdapter(),
             stems: StemsKitAdapter(supportDirectory: supportDirectory),
-            apollo: ApolloBridgeAdapter(projectDirectory: apolloProject, supportDirectory: supportDirectory),
+            apollo: ApolloMLXAdapter(supportDirectory: supportDirectory),
             isFake: false
         )
     }
@@ -78,12 +70,10 @@ struct Engines: Sendable {
     }
 
     /// `-useFakeEngines` (or `-useFakeEngines YES`) forces the fakes;
-    /// `-useFakeEngines NO` insists on the real ones. Without the argument
-    /// the real engines are used when linked, the fakes otherwise.
+    /// `-useFakeEngines NO` (or no argument) uses the real ones.
     static func forLaunch(supportDirectory: URL, arguments: [String] = CommandLine.arguments) -> Engines {
-        let wantsFakes = LaunchArguments.flag("useFakeEngines", in: arguments)
-        if wantsFakes != true, let real = real(supportDirectory: supportDirectory) {
-            return real
+        if LaunchArguments.flag("useFakeEngines", in: arguments) != true {
+            return real(supportDirectory: supportDirectory)
         }
         let speed = LaunchArguments.value("fakeEngineSpeed", in: arguments).flatMap(Double.init) ?? 1
         return fake(supportDirectory: supportDirectory, speed: speed)

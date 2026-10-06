@@ -20,7 +20,7 @@ import Foundation
 /// rate, channels, length and tags reported.
 ///
 /// Point `-supportDirectory` somewhere disposable to keep models and the
-/// Apollo runtime out of `~/Library/Application Support/DJTools`.
+/// Apollo weights out of `~/Library/Application Support/DJTools`.
 /// `-useFakeEngines` runs the same steps on the fakes.
 /// Available in Release too: there's no GUI session on the build Mac.
 @MainActor
@@ -66,7 +66,8 @@ enum SelfTest {
             "supportDirectory": support.path,
             "engines": engines.isFake ? "fake" : "real",
             "format": format.rawValue,
-            "apolloProject": orNull(Bundle.main.url(forResource: "apollo", withExtension: nil)?.path),
+            "apolloModels": support.appending(path: "models/apollo-mlx").path,
+            "bundlesPythonApollo": Bundle.main.url(forResource: "apollo", withExtension: nil) != nil,
             "physicalMemoryGB": Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824,
         ]
         var ok = true
@@ -187,7 +188,7 @@ enum SelfTest {
                 apollo["outputBytes"] = orNull(fileSize(written))
                 apollo["progress"] = progress.summary
                 apollo["status"] = status.summary
-                apollo["childPeakRSSMB"] = peakRSSMB(children: true)
+                apollo["processPeakRSSMB"] = peakRSSMB(children: false)
                 log("repair done in \(seconds(elapsed)) s")
             } catch {
                 ok = false
