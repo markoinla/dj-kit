@@ -52,7 +52,8 @@ protocol LoudnessMeasuring: Sendable {
 
 /// `AnalysisKit.MusicalAnalyzer`: BPM and key from one decode. The first
 /// analysis downloads the tempo model (81 MB) and `status` says so
-/// ("Downloading model…"), then "Analyzing…". Cancelled by cancelling the
+/// ("Downloading model…"), then "Analyzing…"; when it can't, throws
+/// `DJAnalysisModelUnavailable` (transient). Cancelled by cancelling the
 /// calling task.
 protocol MusicalAnalyzing: Sendable {
     func analyze(

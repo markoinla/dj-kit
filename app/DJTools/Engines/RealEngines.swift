@@ -187,7 +187,12 @@ struct AnalysisKitAdapter: MusicalAnalyzing {
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
     ) async throws -> DJMusicalAnalysis {
-        let a = try await analyzer.analyze(url, progress: MainHop.wrap(progress), status: MainHop.wrap(status))
+        let a: MusicalAnalysis
+        do {
+            a = try await analyzer.analyze(url, progress: MainHop.wrap(progress), status: MainHop.wrap(status))
+        } catch MusicalAnalyzerError.modelUnavailable(let message) {
+            throw DJAnalysisModelUnavailable(message: message)
+        }
         return DJMusicalAnalysis(
             tempo: a.tempo.map { DJTempoEstimate(rawBPM: $0.rawBPM, beatCount: $0.beatCount, stability: $0.stability) },
             key: a.key.map { DJKeyEstimate(key: DJMusicalKey(tonic: $0.key.tonic, isMinor: $0.key.isMinor), margin: $0.margin) },

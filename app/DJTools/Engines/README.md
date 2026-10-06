@@ -37,7 +37,9 @@ mlx-swift (both pin `upToNextMinor(from: "0.32.3")`).
 BPM and key: `MusicalAnalyzer` decodes once and runs libkeyfinder and Beat
 This! side by side; the tempo model (81 MB) downloads on the first analysis
 into `<supportDirectory>/models/beat-this/` with "Downloading model…" as the
-job's status line. AnalysisKit pins the same mlx-swift as the other two.
+job's status line. When it can't be set up (offline) only that job fails
+(`DJAnalysisModelUnavailable`, not kept on the track); the next trigger tries
+again. AnalysisKit pins the same mlx-swift as the other two.
 
 `apollo/` (Python) and `Packages/ApolloBridge` stay in the repo as the
 reference implementation; the app no longer links or bundles them.
@@ -53,7 +55,7 @@ each stem is saved with the same gain. Tags: the source's plus the Track ID
 match, title unsuffixed on the finished track (" (Vocals)" … on stems), and
 "Repaired · −10.0 LUFS" appended to the comment, plus the detected BPM and
 key where the source has none (`TrackTags.fillingAnalysis`: BPM folded for the
-genre, only for a steady tempo; key spelled per Settings ▸ Analysis; existing
+genre the file is written with, only for a steady tempo; key spelled per Settings ▸ Analysis; existing
 tags always win). Apply writes them into the original under the same rule. Names:
 `<out>/<track>.<ext>` (replaced on a re-run, never over the source) and
 `<out>/<track> (Stems)/<track> (Vocals).<ext>` (replacing an older folder).

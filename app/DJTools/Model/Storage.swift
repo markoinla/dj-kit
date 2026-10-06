@@ -71,7 +71,8 @@ final class AppSettings {
         static let identifyOnAdd = "identifyOnAdd"
         static let renameOnApply = "renameOnApply"
         static let autoApplyMatches = "autoApplyMatches"
-        static let detectBPMKeyOnAdd = "detectBPMKeyOnAdd"
+        // Named for when it only ran on add; kept so the saved value stays.
+        static let detectBPMKey = "detectBPMKeyOnAdd"
         static let keyTag = "keyTag"
         // Before Process (read once, to seed `lastRecipe`).
         static let saveFormat = "saveFormat"
@@ -114,10 +115,10 @@ final class AppSettings {
         didSet { defaults.set(autoApplyMatches, forKey: Key.autoApplyMatches) }
     }
 
-    /// Detect BPM and key on every dropped track (and on selecting one
-    /// that hasn't been, and before a Process run saves).
-    var detectBPMKeyOnAdd: Bool {
-        didSet { defaults.set(detectBPMKeyOnAdd, forKey: Key.detectBPMKeyOnAdd) }
+    /// Detect BPM and key: on every dropped track, on showing one that
+    /// hasn't been, and before a Process run or Apply writes tags.
+    var detectBPMKey: Bool {
+        didSet { defaults.set(detectBPMKey, forKey: Key.detectBPMKey) }
     }
 
     /// How a written key tag is spelled.
@@ -159,7 +160,7 @@ final class AppSettings {
         identifyOnAdd = defaults.object(forKey: Key.identifyOnAdd) as? Bool ?? true
         renameOnApply = defaults.object(forKey: Key.renameOnApply) as? Bool ?? true
         autoApplyMatches = defaults.bool(forKey: Key.autoApplyMatches)
-        detectBPMKeyOnAdd = defaults.object(forKey: Key.detectBPMKeyOnAdd) as? Bool ?? true
+        detectBPMKey = defaults.object(forKey: Key.detectBPMKey) as? Bool ?? true
         keyTag = defaults.string(forKey: Key.keyTag).flatMap(KeyTagStyle.init) ?? .musical
     }
 

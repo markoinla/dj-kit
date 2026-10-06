@@ -33,13 +33,20 @@ public struct TempoEstimate: Sendable, Codable, Equatable {
     self.stability = stability
   }
 
-  /// Halves or doubles into `range` only when outside it.
+  /// Halves or doubles into `range` only when outside it. A tempo just outside a range narrower
+  /// than an octave (175.4 for 88…175) stays as it is rather than landing below the other end.
   public func bpm(in range: ClosedRange<Double>) -> Double {
     var bpm = rawBPM
     guard bpm.isFinite, bpm > 0 else { return bpm }
     var steps = 0
-    while bpm < range.lowerBound && steps < 8 { bpm *= 2; steps += 1 }
-    while bpm > range.upperBound && steps < 16 { bpm /= 2; steps += 1 }
+    while bpm < range.lowerBound && steps < 8 {
+      if bpm * 2 > range.upperBound { break }
+      bpm *= 2; steps += 1
+    }
+    while bpm > range.upperBound && steps < 16 {
+      if bpm / 2 < range.lowerBound { break }
+      bpm /= 2; steps += 1
+    }
     return bpm
   }
 

@@ -61,6 +61,50 @@ struct MusicalAnalyzerTests {
     await #expect(throws: MusicalAnalyzerError.self) { try await analyzer.analyze(url) }
   }
 
+  /// No models folder can be made: a transient `.modelUnavailable`, not a file error.
+  @Test func modelSetupFailureIsTransient() async throws {
+    let url = try Self.writeLoop(seconds: 5)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let analyzer = MusicalAnalyzer(modelsDirectory: URL(fileURLWithPath: "/dev/null/beat-this"))
+    do {
+      _ = try await analyzer.analyze(url)
+      Issue.record("expected modelUnavailable")
+    } catch MusicalAnalyzerError.modelUnavailable {
+    } catch {
+      Issue.record("\(error)")
+    }
+  }
+
+  /// The streaming 22050 Hz decode feeds the tracker the same beats as the Python reference
+  /// (BEAT_THIS_REF_DIR + BEAT_THIS_AUDIO), and libkeyfinder gives the same keys as at the file's rate.
+  @Test(.enabled(if: TempoTestEnv.refDir != nil && TempoTestEnv.audioDir != nil))
+  func streamingDecodeMatchesReference() async throws {
+    let ref = try #require(TempoTestEnv.refDir), audio = try #require(TempoTestEnv.audioDir)
+    let tracker = try await TempoTestEnv.tracker()
+    let files = try FileManager.default.contentsOfDirectory(at: audio, includingPropertiesForKeys: nil)
+    var compared = 0
+    for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+      let name = file.deletingPathExtension().lastPathComponent
+      let refBeatsURL = ref.appendingPathComponent(name).appendingPathComponent("beats_final0.txt")
+      guard FileManager.default.fileExists(atPath: refBeatsURL.path) else { continue }
+      let refBeats = try TempoTestEnv.readBeats(refBeatsURL)
+      let samples = try MusicalAnalyzer.decodeMono(file, rate: 22_050) { _ in }
+      let beats = try await tracker.beats(monoSamples: samples, sampleRate: 22_050)
+      let (f, _) = TempoTestEnv.fMeasure(reference: refBeats, estimate: beats)
+      let e = TempoEstimate(beatTimes: beats), r = TempoEstimate(beatTimes: refBeats)
+      let native = try TempoTestEnv.decodeMono(file)
+      let keyNative = KeyDetector.detect(monoSamples: native.samples, sampleRate: native.rate)?.key
+      let key22 = KeyDetector.detect(monoSamples: samples, sampleRate: 22_050)?.key
+      print(String(format: "stream %@: F %.4f, BPM %.3f vs %.3f, key %@ vs %@ (native)", name, f,
+                   e?.rawBPM ?? 0, r?.rawBPM ?? 0, key22?.camelot ?? "-", keyNative?.camelot ?? "-"))
+      #expect(f > 0.97, "\(name)")
+      #expect(abs((e?.rawBPM ?? 0) - (r?.rawBPM ?? 0)) < 0.1, "\(name)")
+      #expect(key22 == keyNative, "\(name)")
+      compared += 1
+    }
+    #expect(compared > 0)
+  }
+
   @Test func cancellation() async throws {
     let url = try Self.writeLoop(seconds: 120)
     defer { try? FileManager.default.removeItem(at: url) }

@@ -17,6 +17,11 @@ struct BPMTests {
     #expect(t(96).bpm(in: BPMRange.slow) == 96)
     #expect(t(50).bpm(in: BPMRange.slow) == 100)
     #expect(t(0).bpm(in: BPMRange.standard) == 0)
+    // Just outside the 88…175 range: halving or doubling would overshoot the other end.
+    #expect(t(175.4).bpm(in: BPMRange.standard) == 175.4)
+    #expect(t(176).bpm(in: BPMRange.standard) == 88)
+    #expect(t(87.8).bpm(in: BPMRange.standard) == 87.8)
+    #expect(t(87.5).bpm(in: BPMRange.standard) == 175)
   }
 
   @Test func format() {
@@ -31,8 +36,14 @@ struct BPMTests {
 
   @Test func genreRange() {
     for g in ["Downtempo", "Trip-Hop", "trip hop", "TripHop", "Chill", "Chillout", "Chill-Out", "chill out",
-              "Lounge", "Reggae", "Dub", "Roots Reggae / Dub", "Ambient", "ambient pop"] {
+              "Lounge", "Reggae", "Dub", "Roots Reggae / Dub", "Ambient", "ambient pop", "Downtempo / Electronica"] {
       #expect(BPMRange.forGenre(g) == BPMRange.slow, "\(g)")
+    }
+    // A club style anywhere in the genre wins over a slow word.
+    for g in ["Organic House / Downtempo", "Lounge House", "Chill House", "Ambient Techno", "Chillstep",
+              "Downtempo Garage", "Chill Bass", "Ambient Trance", "Chill Breaks", "Lounge DnB", "Reggae Jungle",
+              "Downtempo Electro", "Chillout Drum & Bass"] {
+      #expect(BPMRange.forGenre(g) == BPMRange.standard, "\(g)")
     }
     for g in ["Dubstep", "Dub-Step", "Dub Techno", "Dub House", "Techno", "House", "Drum & Bass", "Hip-Hop", "", "Pop"] {
       #expect(BPMRange.forGenre(g) == BPMRange.standard, "\(g)")

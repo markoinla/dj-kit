@@ -152,6 +152,14 @@ struct DJTempoEstimate: Sendable, Codable, Equatable {
     var stability: Double
 }
 
+/// `AnalysisKit.MusicalAnalyzerError.modelUnavailable`: the tempo model
+/// couldn't be downloaded or checked (offline, server error). Transient: not
+/// remembered per track, the next try sets it up again.
+struct DJAnalysisModelUnavailable: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 /// Mirrors `AnalysisKit.MusicalAnalysis`.
 struct DJMusicalAnalysis: Sendable, Codable, Equatable {
     /// Nil: no beats found.

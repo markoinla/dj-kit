@@ -86,10 +86,12 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
 }
 
 extension Track {
-    /// What BPM is folded for: the file's genre tag, else Track ID's.
+    /// What BPM is folded for: the genre the written tags will carry, so
+    /// the readout matches them: Track ID's (unless turned down), else the
+    /// file's own genre tag.
     var bpmGenre: String? {
-        if let genre = fileTags?.genre?.trimmed, !genre.isEmpty { return genre }
-        return identityStatus == .dismissed ? nil : identity?.genre
+        if identityStatus != .dismissed, let genre = identity?.genre?.trimmed, !genre.isEmpty { return genre }
+        return fileTags?.genre
     }
 
     /// The detected BPM, folded; nil before analysis or when no beats were found.

@@ -316,7 +316,7 @@ struct AnalyzeRow: View {
                 #if DEBUG
                 .help(debugDetails(track))
                 #endif
-        } else if let error = track.analysisError {
+        } else if let error = analysisFailure(track) {
             Text("Couldn't detect BPM").help(error)
             if !compact {
                 DJLinkButton("Try Again") { model.analyze([track.id]) }
@@ -326,7 +326,15 @@ struct AnalyzeRow: View {
     }
 
     private func hasMusicalLine(_ track: Track) -> Bool {
-        analyzing(track) || track.musicalReadout != nil || track.analysisError != nil
+        analyzing(track) || track.musicalReadout != nil || analysisFailure(track) != nil
+    }
+
+    /// The file's failure (kept), else the last run's (the model couldn't be
+    /// set up: shown until the next try, not kept).
+    private func analysisFailure(_ track: Track) -> String? {
+        if let error = track.analysisError { return error }
+        guard track.analysis == nil, case .failed(let message) = model.job(for: track.id, kind: .analyze)?.state else { return nil }
+        return message
     }
 
     #if DEBUG
