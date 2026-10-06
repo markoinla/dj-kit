@@ -10,6 +10,10 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
     var quality: DJQualityReport?
     /// The last quality check's failure.
     var qualityError: String?
+    /// Measured on demand (the Normalize card, or a normalize run), never
+    /// by the automatic quality check: it takes a full decode.
+    var loudness: DJLoudnessReport?
+    var loudnessError: String?
     var results: [TrackResult]
 
     init(url: URL, addedAt: Date = Date(), id: UUID = UUID()) {
@@ -49,7 +53,9 @@ struct Track: Identifiable, Codable, Sendable, Equatable {
 struct TrackResult: Identifiable, Codable, Sendable, Equatable {
     enum Kind: Codable, Sendable, Equatable {
         case stems(model: DJStemModel, folder: URL, stems: [String: URL])
-        case repaired(output: URL)
+        /// `normalization` when "Also normalize repaired tracks" was on.
+        case repaired(output: URL, normalization: DJNormalizationPlan? = nil)
+        case normalized(output: URL, plan: DJNormalizationPlan)
     }
 
     var id: UUID = UUID()
@@ -60,7 +66,7 @@ struct TrackResult: Identifiable, Codable, Sendable, Equatable {
     var revealURL: URL {
         switch kind {
         case .stems(_, let folder, _): folder
-        case .repaired(let output): output
+        case .repaired(let output, _), .normalized(let output, _): output
         }
     }
 }

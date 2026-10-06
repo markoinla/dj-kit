@@ -2,7 +2,8 @@ import AppKit
 import AudioExport
 import SwiftUI
 
-/// Settings (⌘,): where results go and as what, the default stem model, and Apollo.
+/// Settings (⌘,): where results go and as what, the default stem model,
+/// Apollo, and loudness normalization.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var isConfirmingReset = false
@@ -30,7 +31,7 @@ struct SettingsView: View {
             } header: {
                 Text("Results")
             } footer: {
-                Text("Stems go in a “(Stems)” folder per track; Apollo writes “<track> (Apollo).\(settings.repairFormat.fileExtension)”. AIFF, FLAC and MP3 carry the track's title, artist, album and artwork.")
+                Text("Stems go in a “(Stems)” folder per track; Apollo writes “<track> (Apollo).\(settings.repairFormat.fileExtension)” and Normalize “<track> (Normalized).\(settings.normalizeFormat.fileExtension)”. AIFF, FLAC and MP3 carry the track's title, artist, album and artwork.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -62,6 +63,32 @@ struct SettingsView: View {
                 Text("Apollo")
             } footer: {
                 Text("Removes the downloaded model (about 66 MB) from Application Support. The next repair downloads it again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Target loudness", selection: $settings.targetLUFS) {
+                    ForEach(AppSettings.targetChoices, id: \.self) { lufs in
+                        Text(lufs == AppSettings.defaultTargetLUFS ? "\(DJFormat.lufs(lufs, decimals: 0)) (default)" : DJFormat.lufs(lufs, decimals: 0))
+                            .tag(lufs)
+                    }
+                }
+                Text("Club masters sit around −6 to −9 LUFS; −14 LUFS is streaming level.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("True-peak ceiling", selection: $settings.ceilingDBTP) {
+                    ForEach(AppSettings.ceilingChoices, id: \.self) { dBTP in
+                        Text(dBTP == AppSettings.defaultCeilingDBTP ? "\(DJFormat.dBTP(dBTP)) (default)" : DJFormat.dBTP(dBTP))
+                            .tag(dBTP)
+                    }
+                }
+                FormatPicker(title: "Save normalized tracks as", selection: $settings.normalizeFormat)
+                Toggle("Also normalize repaired tracks", isOn: $settings.normalizeRepairs)
+            } header: {
+                Text("Loudness")
+            } footer: {
+                Text("Gain only: never a limiter or compression. When reaching the target would push the true peak past the ceiling, the gain stops at the ceiling and the track lands quieter. Stems are never normalized, so they still sum back to the mix.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

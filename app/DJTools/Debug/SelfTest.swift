@@ -2,7 +2,7 @@ import AVFoundation
 import AudioExport
 import Foundation
 
-/// `DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestFormat <format>] [-supportDirectory <dir>]`
+/// `DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestNormalize] [-selfTestFormat <format>] [-supportDirectory <dir>]`
 ///
 /// Runs the app's own engine adapters (the same `Engines` the window uses,
 /// not the packages directly) on one file, headless, then prints one JSON
@@ -12,7 +12,14 @@ import Foundation
 ///
 /// 1. quality check;
 /// 2. stems with htdemucs (skip with `-selfTestSkipStems`);
-/// 3. with `-selfTestApollo`: Apollo install if needed, then a repair.
+/// 3. with `-selfTestApollo`: Apollo install if needed, then a repair
+///    (normalized as its last step when `-selfTestNormalize` is given too,
+///    like Settings' "Also normalize repaired tracks");
+/// 4. with `-selfTestNormalize`: Normalize Loudness to `-selfTestTarget`
+///    LUFS (default −10) under a `-selfTestCeiling` dBTP ceiling (default
+///    −1). The output is measured again with LoudnessKit and must land
+///    within ±0.2 LU of the target, or, when the plan was capped, on the
+///    ceiling (±0.1 dB; lossy output only has to stay within 0.5 dB of it).
 ///
 /// Stems and the repair are saved the way the app saves them
 /// (`ResultWriter`), as `-selfTestFormat` (aiff, wav, flac, mp3-320,
@@ -31,7 +38,7 @@ enum SelfTest {
 
     static func start(_ arguments: [String] = CommandLine.arguments) {
         guard let index = arguments.firstIndex(of: "-selfTest"), arguments.indices.contains(index + 2) else {
-            FileHandle.standardError.write(Data("usage: DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestFormat aiff|wav|flac|mp3-320|mp3-256|mp3-192] [-supportDirectory <dir>]\n".utf8))
+            FileHandle.standardError.write(Data("usage: DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestNormalize [-selfTestTarget -10] [-selfTestCeiling -1]] [-selfTestSkipStems] [-selfTestFormat aiff|wav|flac|mp3-320|mp3-256|mp3-192] [-supportDirectory <dir>]\n".utf8))
             exit(64)
         }
         let input = absolute(arguments[index + 1], directory: false)
@@ -55,6 +62,11 @@ enum SelfTest {
         let engines = Engines.forLaunch(supportDirectory: support, arguments: arguments)
         let withApollo = LaunchArguments.flag("selfTestApollo", in: arguments) == true
         let skipStems = LaunchArguments.flag("selfTestSkipStems", in: arguments) == true
+        let withNormalize = LaunchArguments.flag("selfTestNormalize", in: arguments) == true
+        let target = DJLoudnessTarget(
+            lufs: LaunchArguments.value("selfTestTarget", in: arguments).flatMap(Double.init) ?? AppSettings.defaultTargetLUFS,
+            ceilingDBTP: LaunchArguments.value("selfTestCeiling", in: arguments).flatMap(Double.init) ?? AppSettings.defaultCeilingDBTP
+        )
         let formatName = LaunchArguments.value("selfTestFormat", in: arguments) ?? AudioFileFormat.aiff.rawValue
         guard let format = AudioFileFormat(rawValue: formatName) else {
             emit(["ok": false, "error": "Unknown -selfTestFormat \(formatName)"])
@@ -170,16 +182,23 @@ enum SelfTest {
                 let progress = CallbackRecorder<Double>()
                 let status = CallbackRecorder<String>()
                 let start = clock.now
-                let written = try await ResultWriter.repair(
+                let saved = try await ResultWriter.repair(
                     input: input, format: format, outputFolder: output, engine: engines.apollo,
+                    normalize: withNormalize ? ResultWriter.NormalizeStep(target: target, meter: engines.loudness) : nil,
                     progress: { progress.record($0, every: 0.1) { log("repair \(Int($0 * 100))%") } },
                     status: { status.record($0, every: 0) { log("repair status: \($0)") } }
                 )
+                let written = saved.url
                 let elapsed = clock.now - start
                 let check = await checkOutput(written, format: format, expectedDuration: engines.isFake ? nil : track.quality?.duration,
                                               expectedTitleSuffix: " (Repaired)")
                 apollo["check"] = check.json
-                let stepOK = check.ok
+                var stepOK = check.ok
+                if let plan = saved.plan, let measured = saved.loudness {
+                    let landed = await verifyNormalized(written, plan: plan, source: measured, format: format, engines: engines)
+                    apollo["normalized"] = landed.json
+                    stepOK = stepOK && landed.ok
+                }
                 ok = ok && stepOK
                 apollo["ok"] = stepOK
                 apollo["repairSeconds"] = seconds(elapsed)
@@ -198,9 +217,97 @@ enum SelfTest {
             result["apollo"] = apollo
         }
 
+        // 4. Normalize.
+        if withNormalize {
+            log("normalize to \(target.lufs) LUFS, ceiling \(target.ceilingDBTP) dBTP (\(format.rawValue))…")
+            let progress = CallbackRecorder<Double>()
+            let status = CallbackRecorder<String>()
+            var step: [String: Any] = [:]
+            do {
+                let start = clock.now
+                let saved = try await ResultWriter.normalize(
+                    input: input, target: target, format: format, outputFolder: output, engine: engines.loudness,
+                    progress: { progress.record($0, every: 0.1) { log("normalize \(Int($0 * 100))%") } },
+                    status: { status.record($0, every: 0) { log("normalize status: \($0)") } }
+                )
+                let elapsed = clock.now - start
+                let check = await checkOutput(saved.url, format: format, expectedDuration: engines.isFake ? nil : track.quality?.duration,
+                                              expectedTitleSuffix: " (Normalized)")
+                step["check"] = check.json
+                step["seconds"] = seconds(elapsed)
+                step["output"] = saved.url.path
+                step["progress"] = progress.summary
+                step["status"] = status.summary
+                var stepOK = check.ok
+                if let plan = saved.plan, let measured = saved.loudness {
+                    let landed = await verifyNormalized(saved.url, plan: plan, source: measured, format: format, engines: engines)
+                    step["loudness"] = landed.json
+                    stepOK = stepOK && landed.ok
+                } else {
+                    stepOK = false
+                }
+                step["ok"] = stepOK
+                ok = ok && stepOK
+                log("normalize done in \(seconds(elapsed)) s")
+            } catch {
+                ok = false
+                step["ok"] = false
+                step["error"] = error.localizedDescription
+            }
+            result["normalize"] = step
+        }
+
         result["ok"] = ok
         emit(result)
         return ok
+    }
+
+    /// Measures a normalized file again: it must sit at the target (±0.2 LU),
+    /// or, when the plan was capped, have its true peak on the ceiling (±0.1
+    /// dB lossless; lossy output only within 0.5 dB, the encoder moves peaks).
+    /// The fakes' measurements are made up, so for them only the plan is reported.
+    private static func verifyNormalized(_ url: URL, plan: DJNormalizationPlan, source: DJLoudnessReport,
+                                         format: AudioFileFormat, engines: Engines) async -> (ok: Bool, json: [String: Any]) {
+        var json: [String: Any] = [
+            "source": loudnessJSON(source),
+            "plan": [
+                "targetLUFS": plan.targetLUFS, "ceilingDBTP": plan.ceilingDBTP, "gainDB": round2(plan.gainDB),
+                "limitedByCeiling": plan.limitedByCeiling, "resultingLUFS": round2(plan.resultingLUFS),
+                "resultingTruePeakDBTP": round2(plan.resultingTruePeakDBTP),
+            ] as [String: Any],
+        ]
+        guard !engines.isFake else { return (true, json) }
+        do {
+            let after = try await engines.loudness.measure(url, progress: { _ in })
+            json["remeasured"] = loudnessJSON(after)
+            let lufsError = after.integratedLUFS - (plan.limitedByCeiling ? plan.resultingLUFS : plan.targetLUFS)
+            let peakError = after.truePeakDBTP - plan.ceilingDBTP
+            json["lufsError"] = round2(lufsError)
+            json["peakVsCeiling"] = round2(peakError)
+            var ok = abs(lufsError) <= 0.2
+            if plan.limitedByCeiling {
+                ok = ok && (format.isLossless ? abs(peakError) <= 0.1 : abs(peakError) <= 0.5)
+            } else if format.isLossless {
+                ok = ok && peakError <= 0.1
+            }
+            json["ok"] = ok
+            return (ok, json)
+        } catch {
+            json["error"] = error.localizedDescription
+            return (false, json)
+        }
+    }
+
+    private static func loudnessJSON(_ r: DJLoudnessReport) -> [String: Any] {
+        [
+            "integratedLUFS": round2(r.integratedLUFS), "truePeakDBTP": round2(r.truePeakDBTP),
+            "samplePeakDBFS": round2(r.samplePeakDBFS), "loudnessRangeLU": r.loudnessRangeLU.map(round2) ?? NSNull(),
+            "sampleRate": r.sampleRate, "duration": round2(r.duration),
+        ]
+    }
+
+    private static func round2(_ value: Double) -> Any {
+        value.isFinite ? NSDecimalNumber(string: String(format: "%.2f", value)) : "\(value)"
     }
 
     /// Decodes a saved result again: right extension, decodable, 44.1 kHz for

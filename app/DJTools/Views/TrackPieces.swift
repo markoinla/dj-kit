@@ -115,11 +115,11 @@ struct TrackRow: View {
                         .monospacedDigit()
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    if let verdict = track.verdict, job?.kind.isHeavy != true {
+                    if let verdict = track.verdict, job.map({ $0.kind.isHeavy || $0.kind.isDecoding }) != true {
                         QualityBadge(verdict: verdict)
                     }
                 }
-                if let job, job.kind.isHeavy, job.state == .running {
+                if let job, job.kind.isHeavy || job.kind.isDecoding, job.state == .running {
                     DJProgressBar(fraction: job.progress, height: 3)
                         .padding(.top, 1)
                 }
@@ -137,7 +137,13 @@ struct TrackRow: View {
         if let job {
             switch (job.kind, job.state) {
             case (.quality, _): return "Checking quality…"
-            case (_, .queued): return "\(job.kind == .repair ? "Repair" : "Stems") · waiting"
+            case (_, .queued):
+                let tool = switch job.kind {
+                case .repair: "Repair"
+                case .normalize: "Normalize"
+                default: "Stems"
+                }
+                return "\(tool) · waiting"
             default: return job.statusLine
             }
         }
@@ -145,6 +151,8 @@ struct TrackRow: View {
         if track.qualityError != nil { return "Couldn't check" }
         var parts = [track.container.uppercased()]
         if let quality = track.quality { parts.append(DJFormat.duration(quality.duration)) }
+        // Only once measured (the Normalize card): measuring is a full decode.
+        if let loudness = track.loudness, !loudness.isSilent { parts.append(DJFormat.lufs(loudness.integratedLUFS)) }
         if !track.results.isEmpty { parts.append(DJFormat.count(track.results.count, "result")) }
         return parts.joined(separator: " · ")
     }

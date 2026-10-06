@@ -1,5 +1,6 @@
 import ApolloMLX
 import Foundation
+import LoudnessKit
 import os
 import QualityKit
 import StemsKit
@@ -140,5 +141,30 @@ actor ApolloMLXAdapter: ApolloRepairing {
     func reset() async throws {
         await cancel()
         try await repairer.removeWeights()
+    }
+}
+
+/// `LoudnessKit`: BS.1770-4 measurement and the pure-gain plan.
+struct LoudnessKitAdapter: LoudnessMeasuring {
+    func measure(_ url: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> DJLoudnessReport {
+        let r = try await LoudnessAnalyzer.measure(url, progress: MainHop.wrap(progress))
+        return DJLoudnessReport(
+            integratedLUFS: r.integratedLUFS, truePeakDBTP: r.truePeakDBTP, samplePeakDBFS: r.samplePeakDBFS,
+            loudnessRangeLU: r.loudnessRangeLU, duration: r.duration, sampleRate: r.sampleRate, channels: r.channels
+        )
+    }
+
+    func plan(for report: DJLoudnessReport, target: DJLoudnessTarget) -> DJNormalizationPlan {
+        let r = LoudnessReport(
+            integratedLUFS: report.integratedLUFS, truePeakDBTP: report.truePeakDBTP,
+            samplePeakDBFS: report.samplePeakDBFS, loudnessRangeLU: report.loudnessRangeLU,
+            duration: report.duration, sampleRate: report.sampleRate, channels: report.channels
+        )
+        let p = Normalizer.gain(for: r, targetLUFS: target.lufs, ceilingDBTP: target.ceilingDBTP)
+        return DJNormalizationPlan(
+            targetLUFS: p.targetLUFS, ceilingDBTP: p.ceilingDBTP, gainDB: p.gainDB,
+            limitedByCeiling: p.limitedByCeiling, resultingLUFS: p.resultingLUFS,
+            resultingTruePeakDBTP: p.resultingTruePeakDBTP
+        )
     }
 }

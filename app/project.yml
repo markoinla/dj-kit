@@ -16,6 +16,8 @@ packages:
     path: ../Packages/ApolloMLX
   AudioExport:
     path: ../Packages/AudioExport
+  LoudnessKit:
+    path: ../Packages/LoudnessKit
 
 schemes:
   DJTools:
@@ -85,3 +87,5 @@ targets:
       - package: ApolloMLX
         product: ApolloMLX
       - package: AudioExport
+      - package: LoudnessKit
+        product: LoudnessKit

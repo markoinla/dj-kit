@@ -157,6 +157,54 @@ actor FakeApolloRuntime: ApolloRepairing {
     }
 }
 
+/// A deterministic measurement per file name (−16…−6 LUFS, true peak 6–12 dB
+/// above that, at most +0.8 dBTP), after a second of counting up. The plan is
+/// the same arithmetic as `LoudnessKit.Normalizer`. The saved file still goes
+/// through the real AudioExport with that (made-up) gain.
+struct FakeLoudnessMeter: LoudnessMeasuring {
+    var speed: Double = 1
+
+    func measure(_ url: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> DJLoudnessReport {
+        let steps = 10
+        for step in 0...steps {
+            progress(Double(step) / Double(steps))
+            if step < steps { try await Task.sleep(for: .milliseconds(Int(100 / speed))) }
+        }
+        return Self.report(for: url)
+    }
+
+    static func report(for url: URL) -> DJLoudnessReport {
+        let hash = FakeHash.of(url.lastPathComponent)
+        let lufs = -16 + Double(hash % 100) / 10
+        let peak = min(lufs + 6 + Double((hash >> 8) % 60) / 10, 0.8)
+        return DJLoudnessReport(integratedLUFS: lufs, truePeakDBTP: peak, samplePeakDBFS: min(peak - 0.3, 0),
+                                loudnessRangeLU: 3 + Double((hash >> 16) % 80) / 10,
+                                duration: 200 + Double(hash % 260), sampleRate: 44_100, channels: 2)
+    }
+
+    func plan(for report: DJLoudnessReport, target: DJLoudnessTarget) -> DJNormalizationPlan {
+        DJNormalizationPlan.pureGain(for: report, target: target)
+    }
+}
+
+extension DJNormalizationPlan {
+    /// `LoudnessKit.Normalizer.gain`'s arithmetic, for the fakes and previews.
+    static func pureGain(for report: DJLoudnessReport, target: DJLoudnessTarget) -> DJNormalizationPlan {
+        guard !report.isSilent else {
+            return DJNormalizationPlan(targetLUFS: target.lufs, ceilingDBTP: target.ceilingDBTP, gainDB: 0,
+                                       limitedByCeiling: false, resultingLUFS: report.integratedLUFS,
+                                       resultingTruePeakDBTP: report.truePeakDBTP)
+        }
+        let wanted = target.lufs - report.integratedLUFS
+        let headroom = target.ceilingDBTP - report.truePeakDBTP
+        let limited = report.truePeakDBTP.isFinite && wanted > headroom + 1e-9
+        let gain = limited ? headroom : wanted
+        return DJNormalizationPlan(targetLUFS: target.lufs, ceilingDBTP: target.ceilingDBTP, gainDB: gain,
+                                   limitedByCeiling: limited, resultingLUFS: report.integratedLUFS + gain,
+                                   resultingTruePeakDBTP: report.truePeakDBTP + gain)
+    }
+}
+
 struct FakeEngineError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
