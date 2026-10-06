@@ -75,6 +75,22 @@ struct MusicalAnalyzerTests {
     }
   }
 
+  /// After a failed setup, calls fail fast for the cooldown (no second attempt) unless retrying.
+  @Test func failedSetupCoolsDown() async throws {
+    let url = try Self.writeLoop(seconds: 5)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let analyzer = MusicalAnalyzer(modelsDirectory: URL(fileURLWithPath: "/dev/null/beat-this"))
+    for _ in 0..<3 {
+      await #expect(throws: MusicalAnalyzerError.self) { try await analyzer.analyze(url) }
+    }
+    #expect(await analyzer.setupAttempts == 1)
+    await #expect(throws: MusicalAnalyzerError.self) { try await analyzer.analyze(url, retryingModel: true) }
+    #expect(await analyzer.setupAttempts == 2)
+    await analyzer.setRetryCooldown(0)
+    await #expect(throws: MusicalAnalyzerError.self) { try await analyzer.analyze(url) }
+    #expect(await analyzer.setupAttempts == 3)
+  }
+
   /// The streaming 22050 Hz decode feeds the tracker the same beats as the Python reference
   /// (BEAT_THIS_REF_DIR + BEAT_THIS_AUDIO), and libkeyfinder gives the same keys as at the file's rate.
   @Test(.enabled(if: TempoTestEnv.refDir != nil && TempoTestEnv.audioDir != nil))

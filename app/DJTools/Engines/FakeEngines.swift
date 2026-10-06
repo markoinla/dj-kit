@@ -275,7 +275,7 @@ actor FakeMusicalAnalyzer: MusicalAnalyzing {
     }
 
     func analyze(
-        _ url: URL,
+        _ url: URL, retryingModel: Bool,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
     ) async throws -> DJMusicalAnalysis {

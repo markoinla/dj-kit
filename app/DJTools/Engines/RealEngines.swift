@@ -183,13 +183,14 @@ struct AnalysisKitAdapter: MusicalAnalyzing {
     }
 
     func analyze(
-        _ url: URL,
+        _ url: URL, retryingModel: Bool,
         progress: @escaping @Sendable (Double) -> Void,
         status: @escaping @Sendable (String) -> Void
     ) async throws -> DJMusicalAnalysis {
         let a: MusicalAnalysis
         do {
-            a = try await analyzer.analyze(url, progress: MainHop.wrap(progress), status: MainHop.wrap(status))
+            a = try await analyzer.analyze(
+                url, retryingModel: retryingModel, progress: MainHop.wrap(progress), status: MainHop.wrap(status))
         } catch MusicalAnalyzerError.modelUnavailable(let message) {
             throw DJAnalysisModelUnavailable(message: message)
         }
