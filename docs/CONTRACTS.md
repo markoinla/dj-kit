@@ -196,3 +196,80 @@ The app's flow (`ResultWriter.process`): measure Apollo's scratch WAV (or the so
 repairing), plan, then `AudioExporter.export` it with `gainDB`. The stems are separated from the same
 audio and saved with the same gain, so they still sum back to the finished track. Measuring is never
 part of the automatic quality check (it needs a full decode); the Normalize row measures lazily.
+
+## Packages/AnalysisKit — BPM and musical key (optional; tags only where missing)
+
+Key: vendored libkeyfinder (GPL-3, Mixxx's key detector) as the `CKeyFinder` C++ target behind a
+C shim, its FFTW calls replaced by vDSP (no brew deps). Tempo: Beat This! (CPJKU, MIT) — beats from
+frame-wise beat probabilities, BPM = 60 / median inter-beat interval. The network runs through Core
+ML or MLX (whichever ships cleaner; weights pinned to a Hugging Face revision + SHA-256, downloaded
+on first use into `App Support/DJTools/models/beat-this/`, never bundled). Budget: ≤ 3 s for a
+6-minute track on an M-series Mac, decode included. Beatgrid stays Rekordbox's.
+
+```swift
+public struct MusicalKey: Sendable, Codable, Hashable {
+  public var tonic: Int          // pitch class, 0 = C … 11 = B
+  public var isMinor: Bool
+  public var camelot: String { get }   // "8A" (minor = A, major = B)
+  public var musical: String { get }   // Rekordbox spelling: Abm Ebm Bbm Fm Cm Gm Dm Am Em Bm F#m Dbm /
+                                       // B F# Db Ab Eb Bb F C G D A E
+  public init?(parsing tag: String)    // "Am", "A minor", "Amin", "8A", "08A", "G#m", "1m"/"1d" (Open Key), …
+}
+public struct KeyEstimate: Sendable, Codable, Equatable {
+  public var key: MusicalKey
+  public var margin: Double      // how far the best key's score leads the runner-up (0…1); debug only
+}
+public struct TempoEstimate: Sendable, Codable, Equatable {
+  public var rawBPM: Double      // from the beats, before folding
+  public var beatCount: Int
+  public var stability: Double   // coefficient of variation of inter-beat intervals
+  public var isSteady: Bool { get }    // stability under a threshold the tempo worker picks on real music
+  public func bpm(in range: ClosedRange<Double>) -> Double   // halve/double into range when outside it
+}
+public enum BPMRange {
+  public static let standard: ClosedRange<Double>   // 88...175
+  public static let slow: ClosedRange<Double>       // 60...120
+  public static func forGenre(_ genre: String?) -> ClosedRange<Double>
+      // slow for downtempo, trip-hop, chill(out), lounge, reggae, dub (not dubstep), ambient; else standard
+}
+public enum BPMFormat {
+  public static func string(_ bpm: Double) -> String   // "124" within ±0.05 of a whole number, else "123.5"
+}
+public struct MusicalAnalysis: Sendable, Codable, Equatable {
+  public var tempo: TempoEstimate?      // nil: no beats found
+  public var key: KeyEstimate?          // nil: silent / atonal
+  public var duration: TimeInterval
+}
+public enum KeyDetector {   // libkeyfinder; pure CPU
+  public static func detect(monoSamples: [Float], sampleRate: Double) -> KeyEstimate?
+}
+public actor BeatTracker {
+  public init(modelsDirectory: URL)              // app: App Support/DJTools/models/beat-this
+  public var isPrepared: Bool { get }
+  public func prepare(progress: @escaping @Sendable (String) -> Void) async throws   // download + verify
+  public func tempo(monoSamples: [Float], sampleRate: Double) async throws -> TempoEstimate?
+  public func removeWeights() throws
+}
+public actor MusicalAnalyzer {
+  public init(modelsDirectory: URL)
+  public func analyze(_ url: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws -> MusicalAnalysis
+      // one decode to mono, key and tempo from it; prepares the model on first use; cancellable
+  public func removeWeights() throws
+}
+```
+`analysis-eval <rekordbox.xml | folder>` compares against Rekordbox's `AverageBpm`/`Tonality` (XML) or
+the files' own BPM/key tags (folder); reports BPM agreement (±0.5, half/double separately) and key
+agreement (exact, relative, fifth, parallel). Read-only.
+
+The app: Settings ▸ Analysis ("Detect BPM and key when added", on; "Key tag" Musical/Camelot,
+Musical; "Remove Model…"). Runs on add (and lazily when an unanalyzed track is selected) as
+`Job.Kind.analyze`, 2 at a time; the result is `Track.analysis`. Readout in the Analyze row:
+`124 BPM · 8A · Am`, `~96` when the tempo isn't steady, a dim `tag: 123 · 9A` when the file's own
+tags disagree (±0.5 BPM / different key). BPM is folded with `BPMRange.forGenre` (file genre tag,
+else Track ID's genre), at display/save time. Writing: Process outputs (finished track + stems) and
+the original on Apply get `AudioTags.bpm` / `AudioTags.key` only where the file has none; unsteady
+tempo is never written. A Process run waits for a pending analysis before its save.
+
+AudioExport additions: `AudioTags.bpm: String?`, `AudioTags.key: String?` — ID3 TBPM/TKEY (AIFF,
+MP3), Vorbis BPM/INITIALKEY (FLAC); read, written by `AudioExporter.export` and merged by
+`AudioRetagger` like the other fields.
