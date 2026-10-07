@@ -179,6 +179,9 @@ public enum AudioExporter {
       do {
         try input.read(into: buffer, frameCount: chunkFrames)
       } catch {
+        // Some MP3s overstate their length and fail the last read: within a second of the end,
+        // that's the end.
+        if input.length - input.framePosition <= AVAudioFramePosition(input.processingFormat.sampleRate) { break }
         throw AudioExportError.unreadable(error.localizedDescription)
       }
       if buffer.frameLength == 0 { break }

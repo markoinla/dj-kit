@@ -57,6 +57,9 @@ public enum LoudnessAnalyzer {
             do {
                 try file.read(into: buffer, frameCount: chunkFrames)
             } catch {
+                // Some MP3s overstate their length and fail the last read: within a second of
+                // the end, that's the end.
+                if file.length - file.framePosition <= AVAudioFramePosition(format.sampleRate) { break }
                 throw LoudnessError.cannotOpen(error.localizedDescription)
             }
             let n = Int(buffer.frameLength)

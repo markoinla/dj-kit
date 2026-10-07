@@ -274,7 +274,11 @@ private final class MonoReader: @unchecked Sendable {
     do {
       try file.read(into: read, frameCount: Self.chunk)
     } catch {
-      self.error = error
+      // Some MP3s overstate their length and fail the last read; within a second of the end
+      // that's the end of the audio, not an error.
+      if file.length - file.framePosition > AVAudioFramePosition(file.processingFormat.sampleRate) {
+        self.error = error
+      }
       ended = true
       return false
     }
