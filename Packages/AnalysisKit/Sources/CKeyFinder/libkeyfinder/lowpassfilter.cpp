@@ -109,7 +109,7 @@ namespace KeyFinder {
     delete ifft;
   }
 
-  // dj-tools: the same FIR as the original sample-by-sample delay line (output o =
+  // dj-kit: the same FIR as the original sample-by-sample delay line (output o =
   // sum_j coefficients[j] * (input[o - delay + j] / gain), zero outside the input,
   // computed only where o % shortcutFactor == 0 and written in place there), done
   // with vDSP_desampD over a zero-padded copy. Same values up to summation order.

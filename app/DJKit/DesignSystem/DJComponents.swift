@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-// Reusable pieces adapted from Wax Studio's `WaxComponents`, so DJ Tools
+// Reusable pieces adapted from Wax Studio's `WaxComponents`, so DJ Kit
 // reads as the same family: buttons, cards, section labels, the dashed drop
 // zone, progress bars and notices.
 

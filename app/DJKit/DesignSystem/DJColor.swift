@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// DJ Tools' colour tokens: Wax Studio's `WaxColor` (the Wax dashboard's
+/// DJ Kit' colour tokens: Wax Studio's `WaxColor` (the Wax dashboard's
 /// shadcn variables), so the two apps read as siblings. Dynamic colours that
 /// follow the window's appearance. Brand orange (`flame`) is only the wordmark's.
 enum DJColor {

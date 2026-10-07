@@ -87,13 +87,13 @@ struct SidebarBrand: View {
             Image(systemName: "waveform")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(DJColor.flame)
-            Text("DJ Tools")
+            Text("DJ Kit")
                 .font(.dj(17, weight: 750))
                 .tracking(-0.4)
                 .foregroundStyle(DJColor.foreground)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("DJ Tools")
+        .accessibilityLabel("DJ Kit")
     }
 }
 

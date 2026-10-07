@@ -150,7 +150,7 @@ namespace KeyFinder {
     0.49072435317960994006,
   };
 
-  // dj-tools: built once in a function-local static (thread-safe initialisation). The original
+  // dj-kit: built once in a function-local static (thread-safe initialisation). The original
   // filled file-level vectors on first use without a lock, so two first calls at once could race
   // (and push the profile twice).
   static std::vector<double> profile(const double *semitones) {

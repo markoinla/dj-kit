@@ -6,9 +6,9 @@ bridge stay in the repo as the reference implementation but are no longer linked
 Change a contract only by editing this file and saying so.
 
 Common: macOS 14.4 minimum (matches Wax Studio), Swift 6 language mode, Apple Silicon
-(arm64) only. Bundle ID `la.marko.djtools`, display name "DJ Tools" (placeholder).
-App data lives in `~/Library/Application Support/DJTools/`. Default output folder
-`~/Music/DJ Tools/`. No code signing yet (ad-hoc `-` / `CODE_SIGNING_ALLOWED=NO`).
+(arm64) only. Bundle ID `la.marko.djtools`, display name "DJ Kit" (the ID predates the name).
+App data lives in `~/Library/Application Support/DJKit/`. Default output folder
+`~/Music/DJ Kit/`. No code signing yet (ad-hoc `-` / `CODE_SIGNING_ALLOWED=NO`).
 
 ## Packages/QualityKit — bad-file detector (pure Swift: AVFoundation + Accelerate)
 
@@ -43,7 +43,7 @@ public actor StemSeparator {
 }
 ```
 Writes `<outputDirectory>/<track name> (Stems)/<stem>.wav`. Model weights download on first
-use into App Support (`DJTools/models/`), never into the bundle. (The app runs it into a
+use into App Support (`DJKit/models/`), never into the bundle. (The app runs it into a
 scratch folder and saves the result through AudioExport; see below.)
 
 ## apollo/ + Packages/ApolloBridge — Apollo repair, Python behind a Swift bridge (reference only)
@@ -66,7 +66,7 @@ stdout is JSON lines, one object per line, nothing else on stdout (logs go to st
 ```swift
 public enum ApolloSetupState: Sendable, Equatable { case notInstalled, installing(String), ready, failed(String) }
 public actor ApolloRuntime {
-  public init(projectDirectory: URL, supportDirectory: URL)   // supportDirectory = App Support/DJTools
+  public init(projectDirectory: URL, supportDirectory: URL)   // supportDirectory = App Support/DJKit
   public func state() async -> ApolloSetupState
   public func install(progress: @escaping @Sendable (String) -> Void) async throws   // uv + python + deps + weights
   public func repair(input: URL, output: URL,
@@ -112,7 +112,7 @@ peak vs Python MPS 131 s / 4.4 GiB. Wired into the app behind `ApolloRepairing`
 
 ```swift
 public actor ApolloMLXRepairer {
-  public init(modelsDirectory: URL)            // app: App Support/DJTools/models/apollo-mlx
+  public init(modelsDirectory: URL)            // app: App Support/DJKit/models/apollo-mlx
   public var isPrepared: Bool { get }          // converted weights exist
   public func prepare(progress: @escaping @Sendable (String) -> Void) async throws
       // download pinned HF checkpoint (66 MB), SHA-256 check, convert in Swift → apollo-mlx.safetensors
@@ -206,7 +206,7 @@ postprocessing (no madmom DBN). BPM is the least-squares slope of beat time agai
 every run of beats on one consistent grid (pooled, one intercept per run), not 60 / median interval
 (Beat This!'s 50 fps grid quantizes single intervals to 20 ms). Weights: `model.safetensors` from
 Hugging Face `safe-models/beat-this-final0` at revision `39ec648…` (81 MB, SHA-256 pinned in
-`BeatTracker`), downloaded on first use into `App Support/DJTools/models/beat-this/`, never bundled.
+`BeatTracker`), downloaded on first use into `App Support/DJKit/models/beat-this/`, never bundled.
 MLX means building and testing with xcodebuild (Metal shaders). Budget: ≤ 3 s for a 6-minute track
 on an M-series Mac on mains power, decode included. Beatgrid stays Rekordbox's.
 
@@ -256,7 +256,7 @@ public enum KeyDetector {   // libkeyfinder; pure CPU, thread-safe
   public static func detect(monoSamples: [Float], sampleRate: Double) -> KeyEstimate?
 }
 public actor BeatTracker {
-  public init(modelsDirectory: URL)              // app: App Support/DJTools/models/beat-this
+  public init(modelsDirectory: URL)              // app: App Support/DJKit/models/beat-this
   public var isPrepared: Bool { get }
   public func prepare(progress: @escaping @Sendable (String) -> Void) async throws   // download + verify
   public func tempo(monoSamples: [Float], sampleRate: Double) async throws -> TempoEstimate?  // resamples itself

@@ -23,7 +23,7 @@ struct Options {
   static func parse(_ args: [String]) -> Options? {
     var input: URL?
     var models = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("DJTools/models/beat-this", isDirectory: true)
+      .appendingPathComponent("DJKit/models/beat-this", isDirectory: true)
     var limit: Int?
     var csv: URL?
     var i = 0

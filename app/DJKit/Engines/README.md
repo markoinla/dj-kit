@@ -29,7 +29,7 @@ Hugging Face checkpoint, SHA-checks it, converts it in Swift to
 repair's `Task` (checked between chunks), reset ↔ `removeWeights()`. Weights
 live in `<supportDirectory>/models/apollo-mlx/`. The package only reports
 progress, so the adapter makes the status lines: "Loading model" until the
-first chunk, "Repairing", "Writing output" at 100 %. `DJToolsMain` sets
+first chunk, "Repairing", "Writing output" at 100 %. `DJKitMain` sets
 `MLX_ENABLE_TF32=0` before anything touches MLX (the parity numbers in
 ApolloMLX were measured that way). StemsKit and ApolloMLX share one
 mlx-swift (both pin `upToNextMinor(from: "0.32.3")`).
@@ -82,7 +82,7 @@ way (Processing / Ready / Done). Finished files are draggable straight into
 Rekordbox.
 
 `Engines.real(supportDirectory:)` builds them; `supportDirectory` is
-`AppPaths.support` (`~/Library/Application Support/DJTools`, or
+`AppPaths.support` (`~/Library/Application Support/DJKit`, or
 `-supportDirectory <path>`).
 
 Process runs that repair or separate (stems ~5.4 GB peak footprint, Apollo
@@ -100,7 +100,7 @@ loudness.
 
 ```sh
 cd app && xcodegen
-xcodebuild -project DJTools.xcodeproj -scheme DJTools -configuration Release \
+xcodebuild -project DJKit.xcodeproj -scheme DJKit -configuration Release \
   -destination platform=macOS,arch=arm64 -derivedDataPath .dd \
   CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build
 ```
@@ -115,7 +115,7 @@ Run `xcodegen` before every build on the Mac: `scripts/mac.sh` rsyncs with
 ## Headless self-test
 
 ```sh
-DJTools.app/Contents/MacOS/DJTools -selfTest <audio> <out dir> \
+DJKit.app/Contents/MacOS/DJKit -selfTest <audio> <out dir> \
   -supportDirectory <scratch dir> [-selfTestApollo] [-selfTestSkipStems] [-useFakeEngines]
   [-selfTestAnalyze [-selfTestKeyTag musical|camelot]]
   [-selfTestNormalize [-selfTestTarget -10] [-selfTestCeiling -1]]
@@ -151,11 +151,11 @@ output. The fake loudness meter makes up a measurement per file name, the fake
 analyzer a BPM and key (its first run "downloads the model", marker in
 `fake-engines/`); the
 normalized copy still goes through the real AudioExport. The fake Apollo "install" leaves a marker in
-`App Support/DJTools/fake-engines/`, never in `models/`. `-fakeEngineSpeed 4`
+`App Support/DJKit/fake-engines/`, never in `models/`. `-fakeEngineSpeed 4`
 runs them four times faster.
 
 ## Previews
 
-`DJTools -renderPreviews <dir>` (Debug) renders the main screens with fixture
+`DJKit -renderPreviews <dir>` (Debug) renders the main screens with fixture
 data to PNGs and exits, no window or GUI session needed — see
 `Debug/PreviewRenderer.swift`.

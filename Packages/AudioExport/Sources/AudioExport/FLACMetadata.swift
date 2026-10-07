@@ -3,7 +3,7 @@ import Foundation
 // MARK: - FLAC metadata blocks
 
 enum FLACTags {
-  static let vendor = "DJ Tools (Core Audio FLAC)"
+  static let vendor = "DJ Kit (Core Audio FLAC)"
 
   struct Block {
     var type: UInt8

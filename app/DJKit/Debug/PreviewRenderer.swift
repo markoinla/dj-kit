@@ -226,7 +226,7 @@ struct PreviewFixtures {
         mp3.format = .mp3_320
         mp3Settings.lastRecipe = mp3
         let folder = URL.musicDirectory.appending(path: "Promos/October 2026", directoryHint: .isDirectory)
-        let output = URL.musicDirectory.appending(path: "DJ Tools", directoryHint: .isDirectory)
+        let output = URL.musicDirectory.appending(path: "DJ Kit", directoryHint: .isDirectory)
         let now = Date()
         func track(_ file: String, _ verdict: DJQualityVerdict?, bitrate: Int?, cutoff: Double?, duration: TimeInterval,
                    size: Int64, summary: String) -> Track {
@@ -371,7 +371,7 @@ struct PreviewFixtures {
 
     func model(tracks: [Track], jobs: [Job], apollo: DJApolloSetupState = .notInstalled,
                settings: AppSettings? = nil) -> AppModel {
-        let support = FileManager.default.temporaryDirectory.appending(path: "DJToolsPreviews")
+        let support = FileManager.default.temporaryDirectory.appending(path: "DJKitPreviews")
         let model = AppModel(engines: .fake(supportDirectory: support), settings: settings ?? self.settings, store: nil)
         model.installFixture(tracks: tracks, jobs: jobs, apolloState: apollo)
         return model

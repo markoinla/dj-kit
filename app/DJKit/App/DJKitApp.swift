@@ -7,7 +7,7 @@ import SwiftUI
 /// headlessly and prints JSON (see `SelfTest`); anything else starts the app.
 @main
 @MainActor
-enum DJToolsMain {
+enum DJKitMain {
     static func main() {
         // Before anything touches MLX (StemsKit included): plain fp32 matmuls,
         // not TF32. ApolloMLX's parity with PyTorch was verified this way, and
@@ -20,6 +20,7 @@ enum DJToolsMain {
             exit(0)
         }
         #endif
+        AppPaths.migrateLegacySupport()
         if SelfTest.requested() {
             SelfTest.start()
             // A run loop on the real main thread, not dispatchMain(): that
@@ -27,11 +28,11 @@ enum DJToolsMain {
             // so "delivered on the main thread" couldn't be checked.
             while true { RunLoop.main.run() }
         }
-        DJToolsApp.main()
+        DJKitApp.main()
     }
 }
 
-struct DJToolsApp: App {
+struct DJKitApp: App {
     @State private var model: AppModel
 
     init() {
@@ -43,7 +44,7 @@ struct DJToolsApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("DJ Tools") {
+        WindowGroup("DJ Kit") {
             MainView()
                 .environment(model)
                 .frame(minWidth: 880, minHeight: 560)
@@ -55,7 +56,7 @@ struct DJToolsApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .appInfo) {
-                Button("About DJ Tools") { Credits.showAboutPanel() }
+                Button("About DJ Kit") { Credits.showAboutPanel() }
             }
         }
 

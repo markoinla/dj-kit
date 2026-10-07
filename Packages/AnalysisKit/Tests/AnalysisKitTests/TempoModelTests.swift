@@ -4,7 +4,7 @@
 //     -only-testing:AnalysisKitTests/TempoModelTests
 //
 // Weights come from TEST_RUNNER_BEAT_THIS_MODELS (a directory) or the app's
-// ~/Library/Application Support/DJTools/models/beat-this; without them these tests are skipped,
+// ~/Library/Application Support/DJKit/models/beat-this; without them these tests are skipped,
 // unless TEST_RUNNER_BEAT_THIS_DOWNLOAD=1 lets prepare() fetch them (81 MB) into that directory.
 // Optional, with TEST_RUNNER_ prefixes (xcodebuild strips it):
 //   BEAT_THIS_REF_DIR  output of a reference run of the Python beat_this (per-track folders with
@@ -20,7 +20,7 @@ enum TempoTestEnv {
   static var modelsDirectory: URL {
     if let dir = env["BEAT_THIS_MODELS"] { return URL(fileURLWithPath: dir, isDirectory: true) }
     return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("DJTools/models/beat-this", isDirectory: true)
+      .appendingPathComponent("DJKit/models/beat-this", isDirectory: true)
   }
   static var hasWeights: Bool {
     env["BEAT_THIS_DOWNLOAD"] == "1"

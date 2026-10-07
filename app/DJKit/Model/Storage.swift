@@ -2,20 +2,34 @@ import AudioExport
 import Foundation
 import Observation
 
-/// Where the app keeps things (docs/CONTRACTS.md: App Support/DJTools).
+/// Where the app keeps things (docs/CONTRACTS.md: App Support/DJKit).
 enum AppPaths {
-    /// `~/Library/Application Support/DJTools/`, or `-supportDirectory <path>`
+    /// `~/Library/Application Support/DJKit/`, or `-supportDirectory <path>`
     /// (for `-selfTest` runs and testing, so they don't touch the real one).
     static var support: URL {
         if let path = LaunchArguments.value("supportDirectory") {
             return URL(filePath: path, directoryHint: .isDirectory).absoluteURL.standardizedFileURL
         }
-        return URL.applicationSupportDirectory.appending(path: "DJTools", directoryHint: .isDirectory)
+        return URL.applicationSupportDirectory.appending(path: "DJKit", directoryHint: .isDirectory)
     }
 
-    /// `~/Music/DJ Tools/`.
+    /// The app was "DJ Tools" until 0.1: moves `App Support/DJTools` (library,
+    /// model weights) to `DJKit` once, if `DJKit` doesn't exist yet.
+    static func migrateLegacySupport() {
+        guard LaunchArguments.value("supportDirectory") == nil else { return }
+        let fm = FileManager.default
+        let legacy = URL.applicationSupportDirectory.appending(path: "DJTools", directoryHint: .isDirectory)
+        guard fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: support.path) else { return }
+        do {
+            try fm.moveItem(at: legacy, to: support)
+        } catch {
+            NSLog("DJKit: couldn't move \(legacy.path) to \(support.path): \(error)")
+        }
+    }
+
+    /// `~/Music/DJ Kit/`.
     static var defaultOutputFolder: URL {
-        URL.musicDirectory.appending(path: "DJ Tools", directoryHint: .isDirectory)
+        URL.musicDirectory.appending(path: "DJ Kit", directoryHint: .isDirectory)
     }
 }
 
@@ -54,7 +68,7 @@ struct LibraryStore: Sendable {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try encoder.encode(File(tracks: tracks)).write(to: url, options: .atomic)
         } catch {
-            NSLog("DJTools: couldn't save the library: \(error)")
+            NSLog("DJKit: couldn't save the library: \(error)")
         }
     }
 }

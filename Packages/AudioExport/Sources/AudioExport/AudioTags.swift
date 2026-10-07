@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 
-/// The tags DJ Tools copies from a source track onto its results, and writes
+/// The tags DJ Kit copies from a source track onto its results, and writes
 /// into a track once it's identified.
 public struct AudioTags: Sendable, Equatable {
   public var title: String?

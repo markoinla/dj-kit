@@ -17,6 +17,6 @@ __pycache__/
 .env
 *.key
 *.pem
-app/DJTools/Info.plist
+app/DJKit/Info.plist
 app/build/
 .claude/worktrees/

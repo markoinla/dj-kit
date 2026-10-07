@@ -16,7 +16,7 @@ constexpr double kSilenceMeanSquare = 1e-10;
 
 KeyFinder::KeyFinder &sharedFinder() {
   // One instance serves all threads: its filter / chroma-transform / window caches lock around
-  // the whole lookup (dj-tools patch, see VENDORED.md; upstream scanned them unlocked).
+  // the whole lookup (dj-kit patch, see VENDORED.md; upstream scanned them unlocked).
   static KeyFinder::KeyFinder finder;
   return finder;
 }

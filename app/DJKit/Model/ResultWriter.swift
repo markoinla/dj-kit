@@ -229,7 +229,7 @@ enum ResultWriter {
                                      appropriateFor: outputFolder, create: true) {
             return folder
         }
-        let folder = fm.temporaryDirectory.appending(path: "DJTools-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let folder = fm.temporaryDirectory.appending(path: "DJKit-\(UUID().uuidString)", directoryHint: .isDirectory)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }

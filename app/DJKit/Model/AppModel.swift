@@ -99,7 +99,7 @@ final class AppModel {
         if added.isEmpty {
             if !urls.isEmpty {
                 notice = Self.audioFiles(in: urls).isEmpty
-                    ? "Nothing to add: DJ Tools reads MP3, M4A, FLAC, WAV and AIFF."
+                    ? "Nothing to add: DJ Kit reads MP3, M4A, FLAC, WAV and AIFF."
                     : "Those tracks are already in the list."
             }
             return []

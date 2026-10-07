@@ -2,7 +2,7 @@ import AVFoundation
 import AudioExport
 import Foundation
 
-/// `DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestNormalize] [-selfTestFormat <format>] [-supportDirectory <dir>]`
+/// `DJKit -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestNormalize] [-selfTestFormat <format>] [-supportDirectory <dir>]`
 ///
 /// Runs the app's own engine adapters (the same `Engines` the window uses,
 /// not the packages directly) on one file, headless, then prints one JSON
@@ -35,7 +35,7 @@ import Foundation
 /// must be the source's, unsuffixed).
 ///
 /// Point `-supportDirectory` somewhere disposable to keep models and the
-/// Apollo weights out of `~/Library/Application Support/DJTools`.
+/// Apollo weights out of `~/Library/Application Support/DJKit`.
 /// `-useFakeEngines` runs the same steps on the fakes.
 /// Available in Release too: there's no GUI session on the build Mac.
 @MainActor
@@ -46,7 +46,7 @@ enum SelfTest {
 
     static func start(_ arguments: [String] = CommandLine.arguments) {
         guard let index = arguments.firstIndex(of: "-selfTest"), arguments.indices.contains(index + 2) else {
-            FileHandle.standardError.write(Data("usage: DJTools -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestNormalize [-selfTestTarget -10] [-selfTestCeiling -1]] [-selfTestSkipStems] [-selfTestFormat aiff|wav|flac|mp3-320|mp3-256|mp3-192] [-supportDirectory <dir>]\n".utf8))
+            FileHandle.standardError.write(Data("usage: DJKit -selfTest <audio file> <output dir> [-selfTestApollo] [-selfTestNormalize [-selfTestTarget -10] [-selfTestCeiling -1]] [-selfTestSkipStems] [-selfTestFormat aiff|wav|flac|mp3-320|mp3-256|mp3-192] [-supportDirectory <dir>]\n".utf8))
             exit(64)
         }
         let input = absolute(arguments[index + 1], directory: false)

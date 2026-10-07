@@ -46,7 +46,7 @@ namespace KeyFinder {
   }
 
   const ChromaTransform* ChromaTransformFactory::getChromaTransform(unsigned int frameRate) {
-    // dj-tools: the lock covers the lookup too (see lowpassfilterfactory.cpp).
+    // dj-kit: the lock covers the lookup too (see lowpassfilterfactory.cpp).
     std::lock_guard<std::mutex> guard(chromaTransformFactoryMutex);
     for (unsigned int i = 0; i < chromaTransforms.size(); i++) {
       ChromaTransformWrapper* wrapper = chromaTransforms[i];

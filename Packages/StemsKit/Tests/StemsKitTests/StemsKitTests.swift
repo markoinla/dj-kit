@@ -5,7 +5,7 @@ import Testing
 
 @Test func defaultModelsDirectoryIsInAppSupport() {
   let path = StemSeparator.defaultModelsDirectory.path
-  #expect(path.hasSuffix("Library/Application Support/DJTools/models"))
+  #expect(path.hasSuffix("Library/Application Support/DJKit/models"))
 }
 
 @Test func modelNames() {

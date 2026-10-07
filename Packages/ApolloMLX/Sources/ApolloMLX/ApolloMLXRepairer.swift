@@ -26,7 +26,7 @@ public actor ApolloMLXRepairer {
 
   public static var defaultModelsDirectory: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("DJTools/models/apollo-mlx", isDirectory: true)
+      .appendingPathComponent("DJKit/models/apollo-mlx", isDirectory: true)
   }
 
   public struct Options: Sendable {

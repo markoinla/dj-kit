@@ -74,10 +74,10 @@ public enum StemsError: Error, LocalizedError, Sendable {
 /// Separates a track into stems. Keep one instance per model and reuse it: the loaded
 /// weights and compiled graphs stay in memory between calls. Inference runs one call at a time.
 public actor StemSeparator {
-  /// `~/Library/Application Support/DJTools/models/`
+  /// `~/Library/Application Support/DJKit/models/`
   public static var defaultModelsDirectory: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("DJTools", isDirectory: true)
+      .appendingPathComponent("DJKit", isDirectory: true)
       .appendingPathComponent("models", isDirectory: true)
   }
 

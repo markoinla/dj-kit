@@ -1,4 +1,4 @@
-name: DJTools
+name: DJKit
 options:
   bundleIdPrefix: la.marko
   deploymentTarget:
@@ -6,7 +6,7 @@ options:
   createIntermediateGroups: true
   xcodeVersion: "16.4"
 
-# The engine packages, by local path (DJTools/Engines/README.md).
+# The engine packages, by local path (DJKit/Engines/README.md).
 packages:
   QualityKit:
     path: ../Packages/QualityKit
@@ -22,10 +22,10 @@ packages:
     path: ../Packages/AnalysisKit
 
 schemes:
-  DJTools:
+  DJKit:
     build:
       targets:
-        DJTools: all
+        DJKit: all
     run:
       config: Debug
       commandLineArguments:
@@ -51,18 +51,18 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
 
 targets:
-  DJTools:
+  DJKit:
     type: application
     platform: macOS
     sources:
-      - path: DJTools
+      - path: DJKit
         excludes:
           - "**/*.md"
     info:
-      path: DJTools/Info.plist
+      path: DJKit/Info.plist
       properties:
-        CFBundleDisplayName: DJ Tools
-        CFBundleName: DJ Tools
+        CFBundleDisplayName: DJ Kit
+        CFBundleName: DJ Kit
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleExecutable: $(EXECUTABLE_NAME)
@@ -72,14 +72,14 @@ targets:
         LSApplicationCategoryType: public.app-category.music
         NSHumanReadableCopyright: ""
         # Track ID: MusicKit catalog lookups ask for this before they run.
-        NSAppleMusicUsageDescription: DJ Tools looks up album, label, release date and artwork for identified tracks in the Apple Music catalog.
+        NSAppleMusicUsageDescription: DJ Kit looks up album, label, release date and artwork for identified tracks in the Apple Music catalog.
         # Manrope (Resources/Fonts) is registered at launch.
         ATSApplicationFontsPath: .
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: la.marko.djtools
-        PRODUCT_NAME: DJTools
-        INFOPLIST_FILE: DJTools/Info.plist
+        PRODUCT_NAME: DJKit
+        INFOPLIST_FILE: DJKit/Info.plist
         ENABLE_HARDENED_RUNTIME: NO
         # Not sandboxed (yet): results go to any folder the user picks.
         ENABLE_APP_SANDBOX: NO

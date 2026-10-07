@@ -10,7 +10,7 @@ func fail(_ message: String) -> Never {
 
 let usage = """
   usage: stemsplit <input> <outdir> [--model htdemucs|htdemucsFT|htdemucs6s] [--models-dir DIR] [--verify]
-    --models-dir  weight cache (default ~/Library/Application Support/DJTools/models)
+    --models-dir  weight cache (default ~/Library/Application Support/DJKit/models)
     --verify      check stems: duration, level, and how well they sum back to the input
   """
 var positional: [String] = []

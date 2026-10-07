@@ -1,6 +1,6 @@
 import AppKit
 
-/// Third-party work DJ Tools ships or downloads, for Settings ▸ Credits and
+/// Third-party work DJ Kit ships or downloads, for Settings ▸ Credits and
 /// the About panel. Apollo's CC BY-SA 4.0 requires the attribution.
 struct Credit: Identifiable, Sendable {
     var id: String { name }
@@ -14,7 +14,7 @@ enum Credits {
     static let all: [Credit] = [
         Credit(
             name: "Apollo", license: "CC BY-SA 4.0",
-            detail: "Repair model and weights by Kai Li and Yi Luo (“Apollo: Band-sequence Modeling for High-Quality Audio Restoration”, ICASSP 2025). DJ Tools runs its own MLX port of the inference code (ApolloMLX), shared under the same license.",
+            detail: "Repair model and weights by Kai Li and Yi Luo (“Apollo: Band-sequence Modeling for High-Quality Audio Restoration”, ICASSP 2025). DJ Kit runs its own MLX port of the inference code (ApolloMLX), shared under the same license.",
             url: URL(string: "https://github.com/JusperLee/Apollo")!
         ),
         Credit(
@@ -29,7 +29,7 @@ enum Credits {
         ),
         Credit(
             name: "Beat This!", license: "MIT",
-            detail: "Beat tracking model and weights by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (CPJKU, JKU Linz; “Beat This! Accurate Beat Tracking Without DBN Postprocessing”, ISMIR 2024). DJ Tools runs its own MLX port for BPM.",
+            detail: "Beat tracking model and weights by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (CPJKU, JKU Linz; “Beat This! Accurate Beat Tracking Without DBN Postprocessing”, ISMIR 2024). DJ Kit runs its own MLX port for BPM.",
             url: URL(string: "https://github.com/CPJKU/beat_this")!
         ),
         Credit(

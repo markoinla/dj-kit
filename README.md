@@ -1,4 +1,4 @@
-# DJ Tools
+# DJ Kit
 
 Native macOS app for preparing tracks: separate stems (Demucs on MLX), repair lossy rips
 (Apollo), and flag low-quality or fake-lossless files. macOS 14.4+, Apple Silicon.

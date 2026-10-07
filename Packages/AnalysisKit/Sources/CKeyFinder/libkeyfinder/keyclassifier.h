@@ -31,7 +31,7 @@ namespace KeyFinder {
   public:
     KeyClassifier(const std::vector<double>& majorProfile, const std::vector<double>& minorProfile);
     ~KeyClassifier();
-    // dj-tools: optional outScores receives the 24 cosine similarities (key_t order).
+    // dj-kit: optional outScores receives the 24 cosine similarities (key_t order).
     key_t classify(const std::vector<double>& chromaVector, std::vector<double>* outScores = nullptr);
   private:
     ToneProfile* major;

@@ -8,7 +8,7 @@ General Public License, version 3 or later (see `LICENSE`). https://github.com/m
   (SHA-256 `a54fc6c5ff435bb4b447f175bc97f9081fb5abf0edd5d125e6f5215c8fff4d11`).
 - Copied: every `src/*.cpp` and `src/*.h` into `libkeyfinder/`; `LICENSE`.
 - Left out: tests, examples, docs, CMake and packaging files.
-- Patched (each marked `dj-tools:`):
+- Patched (each marked `dj-kit:`):
   - `fftadapter.cpp`: FFTW replaced by vDSP's double-precision complex DFT. Same
     contract: forward is unnormalised r2c (bins above n / 2 read as zero), inverse is
     c2r from bins 0…n / 2, `getOutput` divides by n. Checked against a naive DFT in

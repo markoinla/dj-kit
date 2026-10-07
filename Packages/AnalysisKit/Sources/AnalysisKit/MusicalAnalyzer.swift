@@ -53,7 +53,7 @@ public actor MusicalAnalyzer {
 
   func setRetryCooldown(_ seconds: TimeInterval) { retryCooldown = seconds }
 
-  /// - Parameter modelsDirectory: the app passes App Support/DJTools/models/beat-this.
+  /// - Parameter modelsDirectory: the app passes App Support/DJKit/models/beat-this.
   public init(modelsDirectory: URL) {
     tracker = BeatTracker(modelsDirectory: modelsDirectory)
   }

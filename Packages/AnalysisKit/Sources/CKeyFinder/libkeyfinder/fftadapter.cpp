@@ -21,7 +21,7 @@
 
 #include "fftadapter.h"
 
-// dj-tools: FFTW replaced by Accelerate (vDSP complex DFT, double precision).
+// dj-kit: FFTW replaced by Accelerate (vDSP complex DFT, double precision).
 // Same contract as the FFTW version: forward is an unnormalised r2c transform
 // whose bins above frameSize / 2 read as zero; inverse is c2r (only bins
 // 0...frameSize / 2 are used, Hermitian symmetry assumed, imaginary parts of

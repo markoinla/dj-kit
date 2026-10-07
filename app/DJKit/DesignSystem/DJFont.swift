@@ -2,7 +2,7 @@ import AppKit
 import CoreText
 import SwiftUI
 
-/// Manrope, Wax Studio's one typeface, shared so DJ Tools reads as its sibling.
+/// Manrope, Wax Studio's one typeface, shared so DJ Kit reads as its sibling.
 ///
 /// The bundled file is a variable TTF (weight axis) in `Resources/Fonts`,
 /// registered at launch through `ATSApplicationFontsPath`. Weights are set on the `wght` axis directly —
@@ -52,7 +52,7 @@ enum DJFont {
 /// Mac; each step maps to the Mac size that plays the same role
 /// (`text-sm` → 13, `text-xs` → 11, `text-2xl` → 22).
 enum DJTextStyle: CaseIterable {
-    /// Page titles ("DJ Tools", a track's name): `text-2xl font-bold tracking-tight`.
+    /// Page titles ("DJ Kit", a track's name): `text-2xl font-bold tracking-tight`.
     case display
     /// The Set editor's title: `text-base font-semibold tracking-tight`.
     case title

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The file types DJ Tools can write its results as.
+/// The file types DJ Kit can write its results as.
 ///
 /// Raw values are stable: they are what Settings stores and what
 /// `-selfTestFormat` takes ("aiff", "wav", "flac", "mp3-320", "mp3-256", "mp3-192").

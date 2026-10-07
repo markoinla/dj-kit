@@ -68,7 +68,7 @@ public actor BeatTracker {
     return Memory.peakMemory
   }
 
-  /// - Parameter modelsDirectory: the app passes App Support/DJTools/models/beat-this.
+  /// - Parameter modelsDirectory: the app passes App Support/DJKit/models/beat-this.
   public init(modelsDirectory: URL) {
     self.modelsDirectory = modelsDirectory
   }

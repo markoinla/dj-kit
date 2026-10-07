@@ -50,7 +50,7 @@ namespace KeyFinder {
   }
 
   const std::vector<double>* TemporalWindowFactory::getTemporalWindow(unsigned int frameSize) {
-    // dj-tools: the lock covers the lookup too (see lowpassfilterfactory.cpp).
+    // dj-kit: the lock covers the lookup too (see lowpassfilterfactory.cpp).
     std::lock_guard<std::mutex> guard(temporalWindowFactoryMutex);
     for (unsigned int i = 0; i < temporalWindows.size(); i++) {
       TemporalWindowWrapper* wrapper = temporalWindows[i];
