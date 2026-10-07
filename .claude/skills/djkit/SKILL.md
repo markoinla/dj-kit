@@ -10,8 +10,11 @@ The app's own binary runs one command on files without opening a window.
 Find it (the app may live anywhere):
 
 ```sh
-DJKIT="$(mdfind 'kMDItemCFBundleIdentifier == la.marko.djtools' | grep -v '/build/' | head -1)/Contents/MacOS/DJKit"
-# none installed: fall back to a build, e.g. app/build/Build/Products/Debug/DJKit.app/Contents/MacOS/DJKit
+for app in /Applications/DJKit.app ~/Applications/DJKit.app \
+    "$(mdfind 'kMDItemCFBundleIdentifier == la.marko.djtools' 2>/dev/null | head -1)" \
+    ~/Desktop/PROJECTS/TOOLS/dj-kit/app/build/Build/Products/Debug/DJKit.app; do
+  [ -x "$app/Contents/MacOS/DJKit" ] && DJKIT="$app/Contents/MacOS/DJKit" && break
+done
 ```
 
 **Run `"$DJKIT" -help` first**, then `"$DJKIT" -help <command>` for one command's
