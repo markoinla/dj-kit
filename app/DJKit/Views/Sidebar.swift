@@ -80,13 +80,14 @@ extension TrackStage {
     }
 }
 
-/// The wordmark: Wax's logo spot, in the same flame orange.
+/// The wordmark: the record mark (Assets: BrandMark, from the Figma file
+/// "DJ Kit — Logo & Icon") in Wax's flame orange.
 struct SidebarBrand: View {
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: "waveform")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(DJColor.flame)
+            Image("BrandMark")
+                .resizable()
+                .frame(width: 17, height: 17)
             Text("DJ Kit")
                 .font(.dj(17, weight: 750))
                 .tracking(-0.4)
