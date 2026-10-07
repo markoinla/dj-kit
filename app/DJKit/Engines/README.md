@@ -112,6 +112,14 @@ compile for x86_64 (no `Float16`). The app bundle then holds
 Run `xcodegen` before every build on the Mac: `scripts/mac.sh` rsyncs with
 `--delete`, which removes the generated (gitignored) `Info.plist`.
 
+## Headless commands
+
+`DJKit <command> <files or folders…> [options]` (`App/Headless.swift`): check, tags,
+loudness, analyze, identify, tag, process, on files only (never the track list), one
+JSON line per file on stdout. `DJKit -help` is the reference; keep it in step with the
+options. A bare first argument means headless (a typo gets "Unknown command", not the
+window); the window's own launches only pass dashed options.
+
 ## Headless self-test
 
 ```sh

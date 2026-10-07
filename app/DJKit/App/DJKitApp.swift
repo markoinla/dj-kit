@@ -4,7 +4,9 @@ import SwiftUI
 /// Entry point. `-renderPreviews <dir>` (Debug builds) draws the main screens
 /// to PNGs offscreen and exits, for checking the design without a GUI
 /// session; `-selfTest <audio> <out dir>` (any build) runs the real engines
-/// headlessly and prints JSON (see `SelfTest`); anything else starts the app.
+/// headlessly and prints JSON (see `SelfTest`); `DJKit <command> …` runs one
+/// command on files without the window (`Headless`, `DJKit -help`); anything
+/// else starts the app.
 @main
 @MainActor
 enum DJKitMain {
@@ -21,8 +23,8 @@ enum DJKitMain {
         }
         #endif
         AppPaths.migrateLegacySupport()
-        if SelfTest.requested() {
-            SelfTest.start()
+        if Headless.requested() || SelfTest.requested() {
+            if Headless.requested() { Headless.start() } else { SelfTest.start() }
             // A run loop on the real main thread, not dispatchMain(): that
             // parks the main thread and drains the main queue on a worker,
             // so "delivered on the main thread" couldn't be checked.
