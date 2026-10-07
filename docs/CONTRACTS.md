@@ -235,7 +235,7 @@ public struct TempoEstimate: Sendable, Codable, Equatable {
       // halve/double into range when outside it; one that would overshoot the other end stays (175.4 → 175.4)
 }
 public enum BPMRange {
-  public static let standard: ClosedRange<Double>   // 88...175
+  public static let standard: ClosedRange<Double>   // 70...180 (wider than an octave: the tracker's tempo stands unless clearly off)
   public static let slow: ClosedRange<Double>       // 60...120
   public static func forGenre(_ genre: String?) -> ClosedRange<Double>
       // standard when it names a club style (house, techno, …step, garage, bass, trance, break(s),

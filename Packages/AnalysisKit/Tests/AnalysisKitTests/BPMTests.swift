@@ -6,22 +6,25 @@ struct BPMTests {
   @Test func folding() {
     func t(_ raw: Double) -> TempoEstimate { TempoEstimate(rawBPM: raw, beatCount: 100, stability: 0.01) }
     #expect(t(124).bpm(in: BPMRange.standard) == 124)
-    #expect(t(87).bpm(in: BPMRange.standard) == 174)
-    #expect(t(70).bpm(in: BPMRange.standard) == 140)
-    #expect(t(43.5).bpm(in: BPMRange.standard) == 174)
+    #expect(t(85).bpm(in: BPMRange.standard) == 85)
+    #expect(t(174).bpm(in: BPMRange.standard) == 174)
+    #expect(t(70).bpm(in: BPMRange.standard) == 70)
+    #expect(t(64).bpm(in: BPMRange.standard) == 128)
+    #expect(t(43.5).bpm(in: BPMRange.standard) == 87)
+    #expect(t(190).bpm(in: BPMRange.standard) == 95)
     #expect(t(250).bpm(in: BPMRange.standard) == 125)
     #expect(t(350).bpm(in: BPMRange.standard) == 175)
-    #expect(t(88).bpm(in: BPMRange.standard) == 88)
-    #expect(t(175).bpm(in: BPMRange.standard) == 175)
+    #expect(t(180).bpm(in: BPMRange.standard) == 180)
     #expect(t(140).bpm(in: BPMRange.slow) == 70)
     #expect(t(96).bpm(in: BPMRange.slow) == 96)
     #expect(t(50).bpm(in: BPMRange.slow) == 100)
     #expect(t(0).bpm(in: BPMRange.standard) == 0)
-    // Just outside the 88…175 range: halving or doubling would overshoot the other end.
-    #expect(t(175.4).bpm(in: BPMRange.standard) == 175.4)
-    #expect(t(176).bpm(in: BPMRange.standard) == 88)
-    #expect(t(87.8).bpm(in: BPMRange.standard) == 87.8)
-    #expect(t(87.5).bpm(in: BPMRange.standard) == 175)
+    // Just outside a range narrower than an octave: halving or doubling would overshoot the other end.
+    let narrow: ClosedRange<Double> = 88...175
+    #expect(t(175.4).bpm(in: narrow) == 175.4)
+    #expect(t(176).bpm(in: narrow) == 88)
+    #expect(t(87.8).bpm(in: narrow) == 87.8)
+    #expect(t(87.5).bpm(in: narrow) == 175)
   }
 
   @Test func format() {

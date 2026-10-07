@@ -2,8 +2,9 @@
 import Foundation
 
 public enum BPMRange {
-  /// House, techno, disco, hip-hop doubled, drum & bass halved… what Rekordbox shows by default.
-  public static let standard: ClosedRange<Double> = 88...175
+  /// Wider than an octave: Beat This!'s own tempo stands unless it's clearly off (a 64 house
+  /// half-time read, a 190 double-time), so ballads stay 85 and drum & bass stays 174.
+  public static let standard: ClosedRange<Double> = 70...180
   /// Downtempo genres, where a 90 BPM beat should not read as 180 nor 70 as 140.
   public static let slow: ClosedRange<Double> = 60...120
 
