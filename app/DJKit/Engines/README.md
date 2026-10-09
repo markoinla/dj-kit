@@ -60,7 +60,9 @@ tags always win). Apply writes them into the original under the same rule. Names
 `<out>/<track>.<ext>` (replaced on a re-run, never over the source) and
 `<out>/<track> (Stems)/<track> (Vocals).<ext>` (replacing an older folder).
 The scratch folder is deleted however the run ends. The last run's steps and
-format are remembered (`AppSettings.lastRecipe`).
+format are remembered (`AppSettings.lastRecipe`). The done card's Run adds a
+skipped step to the latest run's files (`ResultWriter.add`) instead of
+starting over.
 
 Besides the run's overall `progress`, `process` reports the running step and its
 own fraction (`step: (ProcessStep, Double)`, through the main queue, never

@@ -28,6 +28,11 @@ import Foundation
 ///    measured again with LoudnessKit and must land within ±0.2 LU of the
 ///    target, or, when the plan was capped, on the ceiling (±0.1 dB; lossy
 ///    output only has to stay within 0.5 dB of it).
+/// 3. with `-selfTestAdd normalize|stems` (a step 2 skipped): Run on that
+///    step, as the done card does it (`ResultWriter.add`). Normalize: the
+///    finished track must land on the target as in 2, and each stem's sample
+///    peak move by the same gain (±0.2 dB; lossy ±0.5). Stems: checked as in
+///    2, the finished track left as it was.
 ///
 /// Everything is saved as `-selfTestFormat` (aiff, wav, flac, mp3-320,
 /// mp3-256, mp3-192; default aiff); each output is decoded again and its
@@ -222,6 +227,7 @@ enum SelfTest {
             normalize: withNormalize ? target : nil,
             stems: skipStems ? nil : (.htdemucs, LaunchArguments.flag("selfTestAcapella", in: arguments) == true ? .acapellaInstrumental : .all)
         )
+        var firstRun: ProcessedFiles?
         if !steps.isEmpty {
             var step: [String: Any] = [
                 "repair": steps.repair, "normalize": withNormalize, "stems": !skipStems,
@@ -255,6 +261,7 @@ enum SelfTest {
                 )
                 let elapsed = clock.now - start
                 let files = processed.files
+                firstRun = files
                 let duration = engines.isFake ? nil : track.quality?.duration
                 var stepOK = true
 
@@ -308,6 +315,73 @@ enum SelfTest {
                 step["error"] = error.localizedDescription
             }
             result["process"] = step
+        }
+
+        // 3. Run on a skipped step, keeping what the run saved.
+        if let added = LaunchArguments.value("selfTestAdd", in: arguments).flatMap(ProcessStep.init(rawValue:)),
+           added != .repair, let previous = firstRun, !previous.did(added) {
+            var step: [String: Any] = ["step": added.rawValue]
+            do {
+                log("add \(added.rawValue)…")
+                var before: [String: DJLoudnessReport] = [:]
+                for (name, url) in previous.stems ?? [:] {
+                    before[name] = try await engines.loudness.measure(url, progress: { _ in })
+                }
+                let stepOrder = StepOrder()
+                var tags = await AudioTags.read(from: input)
+                tags = TrackTags.fillingAnalysis(tags, from: track, keyTag: keyTag, existing: tags)
+                let run = try await ResultWriter.add(
+                    added, to: previous, target: target, stems: (.htdemucs, .all),
+                    input: input, format: format, tags: tags, outputFolder: output, engines: engines,
+                    progress: { _ in }, step: { current, _ in _ = stepOrder.enter(current) }, status: { log("add status: \($0)") }
+                )
+                let files = run.files
+                var stepOK = stepOrder.entered == [added] && files.repaired == previous.repaired
+                if added == .stems {
+                    // The finished track stays; the stems come from the same audio at its level.
+                    stepOK = stepOK && files.output == previous.output && files.normalization == previous.normalization
+                    let duration = engines.isFake ? nil : track.quality?.duration
+                    var stemFiles: [String: Any] = [:]
+                    for (name, url) in files.stems ?? [:] {
+                        let check = await checkOutput(url, format: format, expectedDuration: duration,
+                                                      expectedTitleSuffix: " (\(name.capitalized))", expectedMusical: expectedMusical)
+                        stemFiles[name] = check.json
+                        stepOK = stepOK && check.ok
+                    }
+                    step["stemFiles"] = stemFiles
+                    stepOK = stepOK && Set((files.stems ?? [:]).keys) == Set(DJStemChoice.all.outputs(for: .htdemucs))
+                } else if let written = files.output, let plan = files.normalization {
+                    stepOK = stepOK && files.stems == previous.stems
+                    let source = try await engines.loudness.measure(previous.repaired ? previous.output! : input, progress: { _ in })
+                    let landed = await verifyNormalized(written, plan: plan, source: source, format: format, engines: engines)
+                    step["loudness"] = landed.json
+                    stepOK = stepOK && landed.ok
+                    if !engines.isFake {
+                        var stems: [String: Any] = [:]
+                        for (name, url) in files.stems ?? [:] {
+                            // Sample peaks: a quiet stem's loudness moves through the
+                            // −70 LUFS gate, its peak moves by exactly the gain.
+                            guard let was = before[name], was.samplePeakDBFS.isFinite else { continue }
+                            let now = try await engines.loudness.measure(url, progress: { _ in })
+                            let error = (now.samplePeakDBFS - was.samplePeakDBFS) - plan.gainDB
+                            stems[name] = round2(error)
+                            stepOK = stepOK && abs(error) <= (format.isLossless ? 0.2 : 0.5)
+                        }
+                        step["stemGainError"] = stems
+                    }
+                } else {
+                    stepOK = false
+                    step["error"] = "no normalized track"
+                }
+                step["output"] = orNull(files.output?.path)
+                step["ok"] = stepOK
+                ok = ok && stepOK
+            } catch {
+                ok = false
+                step["ok"] = false
+                step["error"] = error.localizedDescription
+            }
+            result["add"] = step
         }
 
         result["ok"] = ok

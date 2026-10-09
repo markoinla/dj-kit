@@ -63,7 +63,15 @@ final class AppModel {
     /// be set up (offline), with the message. Not saved; cleared on the next try.
     private(set) var analysisUnavailable: [Track.ID: String] = [:]
     /// Process runs waiting for Apollo's setup to finish.
-    @ObservationIgnored private var pendingProcess: [(id: Track.ID, recipe: ProcessRecipe, target: DJLoudnessTarget)] = []
+    @ObservationIgnored private var pendingProcess: [PendingRun] = []
+
+    private struct PendingRun {
+        var id: Track.ID
+        var recipe: ProcessRecipe
+        var target: DJLoudnessTarget
+        /// Adds to this earlier run's files (`addStep`).
+        var previous: ProcessedFiles?
+    }
 
     init(engines: Engines, settings: AppSettings, store: LibraryStore?) {
         self.engines = engines
@@ -249,7 +257,43 @@ final class AppModel {
         remembered.repair = .suggested
         settings.lastRecipe = remembered
         let target = settings.loudnessTarget
-        let runs = ids.compactMap { id in track(id).map { (id: id, recipe: recipe.resolved(for: $0), target: target) } }
+        let runs = ids.compactMap { id in track(id).map { PendingRun(id: id, recipe: recipe.resolved(for: $0), target: target) } }
+        queue(runs)
+    }
+
+    /// Runs one step the track's latest run skipped, keeping what that run
+    /// saved (`ResultWriter.add`): Stems use the last recipe's model and
+    /// stems, Normalize Settings' target; Repair normalizes again when the
+    /// run did. Saved as the run saved.
+    func addStep(_ step: ProcessStep, to id: Track.ID) {
+        guard let track = track(id), let previous = track.latestFiles, !previous.did(step) else { return }
+        let last = settings.lastRecipe
+        var recipe = ProcessRecipe(repair: .off, normalize: false, stems: false,
+                                   stemModel: last.stemModel, stemChoice: last.stemChoice,
+                                   format: Self.format(of: previous, preferring: last.format))
+        var target = settings.loudnessTarget
+        switch step {
+        case .repair:
+            recipe.repair = .on
+            if let plan = previous.normalization {
+                recipe.normalize = true
+                target = DJLoudnessTarget(lufs: plan.targetLUFS, ceilingDBTP: plan.ceilingDBTP)
+            }
+        case .normalize: recipe.normalize = true
+        case .stems: recipe.stems = true
+        }
+        queue([PendingRun(id: id, recipe: recipe, target: target, previous: previous)])
+    }
+
+    /// The format an earlier run saved in: `preferred` when it's that type.
+    nonisolated static func format(of files: ProcessedFiles, preferring preferred: AudioFileFormat) -> AudioFileFormat {
+        guard let ext = (files.output ?? files.stems?.values.first)?.pathExtension.lowercased() else { return preferred }
+        if ext == preferred.fileExtension { return preferred }
+        return AudioFileFormat.allCases.first { $0.fileExtension == ext } ?? preferred
+    }
+
+    /// Queues `runs`, or asks for Apollo's setup first when one repairs and it isn't there.
+    private func queue(_ runs: [PendingRun]) {
         guard !runs.isEmpty else { return }
         let needsApollo = runs.contains { $0.recipe.repair != .off }
         if needsApollo, apolloState != .ready {
@@ -258,7 +302,9 @@ final class AppModel {
             apolloSetup = ApolloSetupRequest(trackIDs: pendingProcess.map(\.id))
             return
         }
-        for run in runs { enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format) }
+        for run in runs {
+            enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format, previous: run.previous)
+        }
     }
 
     /// Measures loudness for the Normalize row, once per track (not again
@@ -373,13 +419,14 @@ final class AppModel {
 
     /// False when the track is gone or already has this tool queued or running.
     @discardableResult
-    private func enqueue(_ kind: Job.Kind, for trackID: Track.ID, format: AudioFileFormat? = nil) -> Bool {
+    private func enqueue(_ kind: Job.Kind, for trackID: Track.ID, format: AudioFileFormat? = nil,
+                         previous: ProcessedFiles? = nil) -> Bool {
         guard let track = track(trackID) else { return false }
         // Once per tool per track at a time.
         if jobs.contains(where: { $0.trackID == trackID && $0.kind.sameTool(as: kind) && $0.state.isActive }) { return false }
         // Drop older finished runs of the same tool for this track.
         jobs.removeAll { $0.trackID == trackID && $0.kind.sameTool(as: kind) && !$0.state.isActive }
-        jobs.append(Job(trackID: trackID, trackName: track.name, kind: kind, format: format))
+        jobs.append(Job(trackID: trackID, trackName: track.name, kind: kind, format: format, previous: previous))
         if kind == .analyze { analysisUnavailable[trackID] = nil }
         pump()
         return true
@@ -536,11 +583,22 @@ final class AppModel {
                 guard !steps.isEmpty else { throw AppError("Nothing to do: no step is on.") }
                 if steps.repair, apolloState != .ready { throw AppError("Repair isn't set up yet.") }
                 setSteps(job.id, steps.order)
-                let processed = try await ResultWriter.process(
-                    input: current.url, steps: steps, format: job.format ?? recipe.format,
-                    tags: await resultTags(current), outputFolder: try outputFolder(), engines: engines,
-                    progress: progress, step: step, status: status
-                )
+                let format = job.format ?? recipe.format
+                let tags = await resultTags(current)
+                let processed: ResultWriter.Processed
+                if let previous = job.previous, let added = steps.order.first {
+                    processed = try await ResultWriter.add(
+                        added, to: previous, target: target, stems: (recipe.stemModel, recipe.stemChoice),
+                        input: current.url, format: format, tags: tags, outputFolder: try outputFolder(),
+                        engines: engines, progress: progress, step: step, status: status
+                    )
+                } else {
+                    processed = try await ResultWriter.process(
+                        input: current.url, steps: steps, format: format, tags: tags,
+                        outputFolder: try outputFolder(), engines: engines,
+                        progress: progress, step: step, status: status
+                    )
+                }
                 guard isRunning(job.id) else { return }
                 updateTrack(track.id) {
                     // Only the original's own measurement describes the original.
@@ -656,7 +714,7 @@ final class AppModel {
             pendingProcess = []
             apolloSetup = nil
             for run in waiting where track(run.id) != nil {
-                enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format)
+                enqueue(.process(run.recipe, run.target), for: run.id, format: run.recipe.format, previous: run.previous)
             }
         }
     }

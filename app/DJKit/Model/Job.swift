@@ -80,15 +80,19 @@ struct Job: Identifiable, Equatable, Sendable {
     /// The step running now, and how far along it is (0…1).
     var currentStep: ProcessStep?
     var stepProgress: Double?
+    /// A Process run that adds skipped steps to this earlier run's files
+    /// (`ResultWriter.add`) instead of starting over.
+    let previous: ProcessedFiles?
     let createdAt: Date
 
     init(trackID: Track.ID, trackName: String, kind: Kind, format: AudioFileFormat? = nil,
-         id: UUID = UUID(), createdAt: Date = Date()) {
+         previous: ProcessedFiles? = nil, id: UUID = UUID(), createdAt: Date = Date()) {
         self.id = id
         self.trackID = trackID
         self.trackName = trackName
         self.kind = kind
         self.format = kind.isBackground ? nil : format
+        self.previous = kind.isProcess ? previous : nil
         self.createdAt = createdAt
     }
 
@@ -102,7 +106,7 @@ struct Job: Identifiable, Equatable, Sendable {
     /// Where `step` stands in this run.
     func stage(of step: ProcessStep) -> StepStage {
         let planned = plannedSteps
-        guard let index = planned.firstIndex(of: step) else { return .skipped }
+        guard let index = planned.firstIndex(of: step) else { return previous?.did(step) == true ? .done : .skipped }
         if state == .finished { return .done }
         guard state == .running, let current = currentStep, let at = planned.firstIndex(of: current) else { return .waiting }
         return index < at ? .done : index == at ? .running : .waiting

@@ -89,7 +89,7 @@ one of three states derived from the track's jobs and results: **setup** (Analyz
 ID, run on drop — shows its own progress, then ②–④ as switches with options, the file type and Process),
 **processing** (one run per track that does them all, `Job.Kind.process`; each step waiting, running with its
 own bar from `Job.currentStep`/`stepProgress`, done or skipped; Cancel), and **done** (what the run did, the
-saved files as draggable rows/stem chips for Rekordbox, Process Again). The steps and file type start from the
+saved files as draggable rows/stem chips for Rekordbox, Run on a skipped step, Process Again). The steps and file type start from the
 last run (`AppSettings.lastRecipe`; Stems off the first time); Repair starts from the quality check's
 suggestion (on for low quality / fake lossless). The sidebar groups tracks as Processing / Ready / Done; there
 is no separate queue.
@@ -158,6 +158,11 @@ was done goes in the comment tag ("Repaired · −10.0 LUFS"), after the file's 
 tagged with the file's tags plus the match. A separation keeps the stems the run picks
 (`DJStemChoice`); "instrumental" is every stem but the vocals summed. AIFF is the default (Rekordbox
 reads its tags and artwork).
+
+Run on a skipped step (`ResultWriter.add`, a `Job` with `previous` files) adds it without redoing the
+others, saved in the run's format: Stems separate the repaired track (else the original with the run's
+gain); Normalize measures the same audio, replaces the finished track and gives the stems the same gain;
+Repair starts from the original and normalizes again to the run's target when it did (stems unchanged).
 
 ## Packages/LoudnessKit — loudness measurement and normalization (pure Swift: AVFoundation + Accelerate)
 

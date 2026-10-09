@@ -689,8 +689,10 @@ struct ProcessRunList: View {
 
 // MARK: - Done
 
-/// What a finished run did, step by step, and Process Again.
+/// What a finished run did, step by step, Run on a skipped step (adds it
+/// to what the run saved) and Process Again.
 struct ProcessDoneCard: View {
+    @Environment(AppModel.self) private var model
     let track: Track
     let files: ProcessedFiles
     var processAgain: () -> Void
@@ -701,21 +703,21 @@ struct ProcessDoneCard: View {
                 AnalyzeRow(tracks: [track], compact: true)
                 StepRow(number: 2, mark: files.repaired ? .done : .skipped, title: "Repair") {
                     if !files.repaired { Text("Skipped") }
-                } trailing: { EmptyView() }
+                } trailing: { run(.repair) }
                 StepRow(number: 3, mark: files.normalization == nil ? .skipped : .done, title: "Normalize") {
                     if let plan = files.normalization {
                         Text(DJFormat.lufs(plan.resultingLUFS)).help(plan.change)
                     } else {
                         Text("Skipped")
                     }
-                } trailing: { EmptyView() }
+                } trailing: { run(.normalize) }
                 StepRow(number: 4, mark: files.stems?.isEmpty == false ? .done : .skipped, title: "Stems") {
                     if let stems = files.stems, !stems.isEmpty {
                         Text([DJFormat.count(stems.count, "stem"), files.stemModel?.title].compactMap { $0 }.joined(separator: " · "))
                     } else {
                         Text("Skipped")
                     }
-                } trailing: { EmptyView() }
+                } trailing: { run(.stems) }
             }
             StepFooter {
                 Text(format)
@@ -727,6 +729,24 @@ struct ProcessDoneCard: View {
             }
         }
         .djCard()
+    }
+
+    /// Run, on a skipped step.
+    @ViewBuilder private func run(_ step: ProcessStep) -> some View {
+        if !files.did(step) {
+            Button("Run") { model.addStep(step, to: track.id) }
+                .buttonStyle(.dj(.outline, size: .small))
+                .disabled(!track.fileExists)
+                .help(runHelp(step))
+        }
+    }
+
+    private func runHelp(_ step: ProcessStep) -> String {
+        switch step {
+        case .repair: files.normalization == nil ? "From the original" : "From the original, normalized again"
+        case .normalize: "To \(DJFormat.lufs(model.settings.targetLUFS, decimals: 0))"
+        case .stems: model.settings.lastRecipe.stemModel.title
+        }
     }
 
     /// "AIFF", from what was saved.

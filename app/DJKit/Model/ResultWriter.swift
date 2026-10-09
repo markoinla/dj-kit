@@ -145,6 +145,121 @@ enum ResultWriter {
         return Processed(files: files, loudness: measurement)
     }
 
+    /// Adds `added`, a step an earlier run skipped, to that run's `previous`
+    /// files without redoing the others, and returns them merged:
+    /// - Stems: from the finished track when it was repaired (already at its
+    ///   level), else from the original with the run's gain.
+    /// - Normalize: measures the same audio (the finished track when it was
+    ///   repaired, else the original), replaces the finished track at the
+    ///   target and gives the stems the same gain.
+    /// - Repair: everything after it depends on it, so it starts from the
+    ///   original and normalizes again to the run's target when it did; the
+    ///   stems stay as they are.
+    static func add(
+        _ added: ProcessStep, to previous: ProcessedFiles, target: DJLoudnessTarget,
+        stems stemOptions: (model: DJStemModel, choice: DJStemChoice),
+        input: URL, format: AudioFileFormat, tags: AudioTags, outputFolder: URL, engines: Engines,
+        progress: @escaping @Sendable (Double) -> Void,
+        step: @escaping @Sendable (ProcessStep, Double) -> Void,
+        status: @escaping @Sendable (String) -> Void
+    ) async throws -> Processed {
+        if added == .repair {
+            let normalize = previous.normalization.map { DJLoudnessTarget(lufs: $0.targetLUFS, ceilingDBTP: $0.ceilingDBTP) }
+            var processed = try await process(
+                input: input, steps: Steps(repair: true, normalize: normalize, stems: nil), format: format, tags: tags,
+                outputFolder: outputFolder, engines: engines, progress: progress, step: step, status: status
+            )
+            processed.files.stemModel = previous.stemModel
+            processed.files.stemsFolder = previous.stemsFolder
+            processed.files.stems = previous.stems
+            return processed
+        }
+
+        let fm = FileManager.default
+        let scratch = try scratchFolder(near: outputFolder)
+        defer { try? fm.removeItem(at: scratch) }
+        let onStatus = MainHop.wrap(status)
+        // One step: the run's fraction is the step's.
+        let onReport = MainHop.wrap { (fraction: Double) in
+            progress(fraction)
+            step(added, fraction)
+        }
+        let trackName = input.deletingPathExtension().lastPathComponent
+        let base = TrackTags.fileName(TrackTags.displayName(tags, fallback: trackName))
+        // The audio the earlier run saved, before its gain.
+        let source: URL
+        if previous.repaired {
+            guard let output = previous.output, fm.fileExists(atPath: output.path) else {
+                throw AppError("Can't find the repaired track. It may have moved.")
+            }
+            source = output
+        } else {
+            source = input
+        }
+        var files = previous
+        onReport(0)
+
+        if added == .stems {
+            let gainDB = previous.repaired ? 0 : previous.normalization?.gainDB ?? 0
+            let separated = try await separate(
+                source: source, trackName: trackName, base: base, model: stemOptions.model, choice: stemOptions.choice,
+                format: format, tags: tags, note: processNote(repaired: previous.repaired, plan: previous.normalization),
+                gainDB: gainDB, scratch: scratch, outputFolder: outputFolder,
+                engine: engines.stems, progress: onReport, status: status
+            )
+            files.stemModel = stemOptions.model
+            files.stemsFolder = separated.folder
+            files.stems = separated.stems
+            return Processed(files: files, loudness: nil)
+        }
+
+        onStatus("Measuring loudness")
+        let measured = try await engines.loudness.measure(source) { onReport($0 * 0.2) }
+        try Task.checkCancellation()
+        guard !measured.isSilent else { throw AppError("Nothing to normalize: the track is silent.") }
+        let plan = engines.loudness.plan(for: measured, target: target)
+        files.normalization = plan
+        let note = processNote(repaired: previous.repaired, plan: plan)
+        // The stems, when there are, get the same gain: they still sum to the track.
+        let stems = (previous.stems ?? [:]).sorted { $0.key < $1.key }.filter { fm.fileExists(atPath: $0.value.path) }
+        let trackShare = stems.isEmpty ? 0.8 : 0.4
+
+        onStatus("Saving \(format.shortTitle)")
+        var destination = previous.output ?? outputFolder.appending(path: "\(base).\(format.fileExtension)")
+        if destination.standardizedFileURL.path == input.standardizedFileURL.path {
+            destination = AppModel.unique(destination)
+        }
+        var trackTags = tags
+        if trackTags.title?.trimmed.isEmpty ?? true { trackTags.title = trackName }
+        trackTags.comment = joined(tags.comment, note)
+        // Written beside and moved into place, so `source` can be `destination`.
+        files.output = try await AudioExporter.export(
+            source, to: destination, format: format,
+            tags: format.writesTags ? trackTags : nil,
+            gainDB: plan.gainDB,
+            progress: { onReport(0.2 + trackShare * $0) }
+        )
+        try Task.checkCancellation()
+
+        if !stems.isEmpty {
+            onStatus("Saving stems")
+            let model = previous.stemModel.map { " · \($0.modelName)" } ?? ""
+            for (index, (name, url)) in stems.enumerated() {
+                var stemTags = tags.suffixingTitle(" (\(name.capitalized))", fallbackTitle: trackName)
+                stemTags.comment = joined(tags.comment, "\(name.capitalized) stem\(model)", note)
+                let count = Double(stems.count)
+                _ = try await AudioExporter.export(
+                    url, to: url, format: format,
+                    tags: format.writesTags ? stemTags : nil,
+                    gainDB: plan.gainDB,
+                    progress: { onReport(0.6 + 0.4 * (Double(index) + $0) / count) }
+                )
+            }
+            try Task.checkCancellation()
+        }
+        return Processed(files: files, loudness: previous.repaired ? nil : measured)
+    }
+
     /// Demucs on `source`, then each kept stem saved with `gainDB` into
     /// `<out>/<base> (Stems)/` (replacing an earlier folder).
     private static func separate(

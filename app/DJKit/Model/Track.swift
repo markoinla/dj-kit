@@ -171,6 +171,15 @@ struct ProcessedFiles: Codable, Sendable, Equatable {
     var stemModel: DJStemModel?
     var stemsFolder: URL?
     var stems: [String: URL]?
+
+    /// Whether this run did `step`.
+    func did(_ step: ProcessStep) -> Bool {
+        switch step {
+        case .repair: repaired
+        case .normalize: normalization != nil
+        case .stems: stems?.isEmpty == false
+        }
+    }
 }
 
 /// Something a tool wrote for a track.
