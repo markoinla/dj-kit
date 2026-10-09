@@ -59,6 +59,7 @@ struct DJKitApp: App {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .appInfo) {
                 Button("About DJ Kit") { Credits.showAboutPanel() }
+                CheckForUpdatesButton()
             }
         }
 

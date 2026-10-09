@@ -11,6 +11,8 @@ already have; beatgrid stays Rekordbox's. Rekordbox's Auto Gain is
 playback-only, which is why Normalize exists (it bakes the level into a copy).
 
 - Module seams: `docs/CONTRACTS.md`. Research: `research/`.
+- Releases: `scripts/release.sh --publish <version>` (`RELEASING.md`): Developer ID, notarized DMG on
+  GitHub Releases; Sparkle's feed is the latest release's `appcast.xml`. Updater off in Debug.
 - This repo is edited on Linux (a Linux box) and **built on build-mac**:
   `scripts/mac.sh <run-name> '<command>'` rsyncs the repo to `build-mac:~/runs/djt-<run-name>/`
   and runs the command there; `scripts/fetch.sh` copies results back. Use a distinct

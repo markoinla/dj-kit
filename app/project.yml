@@ -20,6 +20,10 @@ packages:
     path: ../Packages/LoudnessKit
   AnalysisKit:
     path: ../Packages/AnalysisKit
+  # Auto-updates for the notarized DMG build (scripts/release.sh).
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    majorVersion: 2.7.0
 
 schemes:
   DJKit:
@@ -42,13 +46,19 @@ settings:
     EXCLUDED_ARCHS: x86_64
     # Signed with the team so ShazamKit and MusicKit (App Services on the
     # App ID la.marko.djtools) accept the app. No provisioning profile needed.
+    # Release (the DMG) is Developer ID, notarized by scripts/release.sh.
     CODE_SIGN_IDENTITY: "Apple Development"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: M44R9APYMG
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     GENERATE_INFOPLIST_FILE: NO
+    # Bumped by scripts/release.sh. CURRENT_PROJECT_VERSION is Sparkle's
+    # build number and goes up with every release.
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+  configs:
+    Release:
+      CODE_SIGN_IDENTITY: "Developer ID Application"
 
 targets:
   DJKit:
@@ -75,13 +85,19 @@ targets:
         NSAppleMusicUsageDescription: DJ Kit looks up album, label, release date and artwork for identified tracks in the Apple Music catalog.
         # Manrope (Resources/Fonts) is registered at launch.
         ATSApplicationFontsPath: .
+        # Sparkle 2: the latest GitHub release's appcast.xml. The private key
+        # is in the login keychain (generate_keys --account djkit).
+        SUFeedURL: https://github.com/markoinla/dj-kit/releases/latest/download/appcast.xml
+        SUPublicEDKey: SsCRJP7OuuN6bdTMSwZ19asG1ujxY03zW5t+ljxbmT8=
+        SUEnableAutomaticChecks: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: la.marko.djtools
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_NAME: DJKit
         INFOPLIST_FILE: DJKit/Info.plist
-        ENABLE_HARDENED_RUNTIME: NO
+        # Notarization requires it.
+        ENABLE_HARDENED_RUNTIME: YES
         # Not sandboxed (yet): results go to any folder the user picks.
         ENABLE_APP_SANDBOX: NO
         ENABLE_PREVIEWS: YES
@@ -97,3 +113,4 @@ targets:
         product: LoudnessKit
       - package: AnalysisKit
         product: AnalysisKit
+      - package: Sparkle

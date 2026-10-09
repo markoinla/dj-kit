@@ -41,6 +41,9 @@ struct TrackSidebar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DJColor.sidebar)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            UpdateAvailableCard()
+        }
         .overlay {
             if model.tracks.isEmpty {
                 VStack(spacing: DJSpace.xs) {

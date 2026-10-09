@@ -48,6 +48,11 @@ enum Credits {
             url: URL(string: "https://lame.sourceforge.io")!
         ),
         Credit(
+            name: "Sparkle", license: "MIT",
+            detail: "Software updates, by the Sparkle Project.",
+            url: URL(string: "https://sparkle-project.org")!
+        ),
+        Credit(
             name: "Manrope", license: "SIL OFL 1.1",
             detail: "Typeface by Mikhail Sharanda.",
             url: URL(string: "https://github.com/sharanda/manrope")!
