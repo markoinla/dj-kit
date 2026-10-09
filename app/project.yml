@@ -54,8 +54,8 @@ settings:
     GENERATE_INFOPLIST_FILE: NO
     # Bumped by scripts/release.sh. CURRENT_PROJECT_VERSION is Sparkle's
     # build number and goes up with every release.
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
   configs:
     Release:
       CODE_SIGN_IDENTITY: "Developer ID Application"
