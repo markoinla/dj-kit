@@ -33,7 +33,7 @@ Assets per release: `DJ-Kit-<version>.dmg` (the appcast points here), `DJ-Kit.dm
 - **Sparkle key**: login keychain, account `djkit` (separate from Wax Studio's). Public key is
   `SUPublicEDKey` in `app/project.yml`. Made with
   `app/build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --account djkit`;
-  back it up with `generate_keys --account djkit -x <file>` and keep it in a password manager.
+  backed up in a password manager .
   `SPARKLE_PRIVATE_KEY_FILE` overrides the keychain. **If the key is lost, installed copies can
   never be updated again.**
 - `gh` logged in with push access; `uv` (for `uvx dmgbuild`).
