@@ -9,9 +9,8 @@ import ShazamKit
 /// artwork. When the song has several releases, the one whose length is
 /// closest to the file wins (an extended mix over the radio edit).
 ///
-/// Ported from Wax Studio's `ShazamIdentifier` and `CatalogEnricher`
-/// (Wax Studio), cut down to one track per
-/// file. Needs the ShazamKit and MusicKit App Services on the App ID
+/// Ported from Wax Studio's `ShazamIdentifier` and `CatalogEnricher`, cut
+/// down to one track per file. Needs the ShazamKit and MusicKit App Services on the App ID
 /// `la.marko.djtools` and a team-signed build; catalog reads need no Apple
 /// Music subscription.
 struct ShazamTrackIdentifier: TrackIdentifying {

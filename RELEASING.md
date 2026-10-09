@@ -23,17 +23,16 @@ appcast, then published as latest).
 Assets per release: `DJ-Kit-<version>.dmg` (the appcast points here), `DJ-Kit.dmg` (same file;
 `releases/latest/download/DJ-Kit.dmg` is the stable download link), `appcast.xml`.
 
-## One-time setup (done on the release Mac)
+## One-time setup
 
-- **Developer ID Application** certificate for team `M44R9APYMG` in the login keychain.
-- **Notary**: keychain profile `djkit-notary`, made from the App Store Connect Team API key
-  `KEYID` (`~/.appstoreconnect/private_keys/AuthKey_KEYID.p8`):
-  `xcrun notarytool store-credentials djkit-notary --key <p8> --key-id KEYID --issuer <issuer id>`.
+- **Developer ID Application** certificate for the team in the login keychain.
+- **Notary**: an App Store Connect Team API key (Developer role), saved as a keychain profile:
+  `xcrun notarytool store-credentials djkit-notary --key <AuthKey.p8> --key-id <key id> --issuer <issuer id>`.
   Or set `NOTARY_KEY_PATH` / `NOTARY_KEY_ID` / `NOTARY_ISSUER_ID`.
 - **Sparkle key**: login keychain, account `djkit` (separate from Wax Studio's). Public key is
   `SUPublicEDKey` in `app/project.yml`. Made with
   `app/build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --account djkit`;
-  backed up in a password manager .
+  back it up with `generate_keys --account djkit -x <file>` somewhere safe (a password manager).
   `SPARKLE_PRIVATE_KEY_FILE` overrides the keychain. **If the key is lost, installed copies can
   never be updated again.**
 - `gh` logged in with push access; `uv` (for `uvx dmgbuild`).

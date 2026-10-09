@@ -20,3 +20,8 @@ __pycache__/
 app/DJKit/Info.plist
 app/build/
 .claude/worktrees/
+# Local only: private infra and credential locations (the repo is public).
+CLAUDE.local.md
+*.local.md
+scripts/mac.sh
+scripts/fetch.sh

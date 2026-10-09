@@ -100,12 +100,11 @@ date, ISRC and 1400 px artwork, preferring the release closest in length to the 
 (Settings ▸ Track ID), two at a time. The match waits on the track (`Track.identity`) until Apply:
 `AudioRetagger` merges the tags into the file without re-encoding (BPM, key and the like stay) and,
 by default, renames it `Artist - Title.<ext>` in place. Needs the ShazamKit and MusicKit App
-Services on `la.marko.djtools` and the team-signed build. Design follows Wax Studio
-(`Wax Studio`, see its `WaxMac/DesignSystem`).
+Services on `la.marko.djtools` and the team-signed build. Design follows Wax Studio's design system.
 
 ## Packages/ApolloMLX — native port of Apollo (MLX Swift), the app's repair engine
 
-Same job as the Python bridge, no Python. Verified on build-mac (M5 Air, 16 GB): fp32 parity
+Same job as the Python bridge, no Python. Verified on an M5 Air (16 GB): fp32 parity
 62.8 dB SNR vs PyTorch on music (119 dB on white noise); fp16 4:00 track in 82 s / 2.7 GiB
 peak vs Python MPS 131 s / 4.4 GiB. Wired into the app behind `ApolloRepairing`
 (`ApolloMLXAdapter`, fp16) since 2026-10-06; the app sets `MLX_ENABLE_TF32=0` at launch.

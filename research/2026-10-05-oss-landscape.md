@@ -52,9 +52,9 @@ problem if the app is ever sold closed-source.
 
 SwiftUI app; analysis in MLX/Swift where ports exist (Demucs, all-in-one), Python
 sidecar (bundled via uv) for the rest (Apollo, Essentia). Watch-folder + queue.
-Can't build Mac apps on a Linux box — use build-mac / another Mac.
+Mac apps build on a Mac (xcodebuild).
 
 ## Related
 
-`Wax` (DJ show archive, has track ID + iOS client) could share the
+Wax (DJ show archive, has track ID + iOS client) could share the
 analysis engine later.
